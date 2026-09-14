@@ -6,7 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { IPOT, DATA_AS_OF_LABEL, DATA_SOURCE_LABEL } from '../lib/ipoData';
+import { DATA_AS_OF_LABEL, DATA_SOURCE_LABEL } from '../lib/ipoData';
 import { IPO } from '../lib/types';
 import { daysUntil, formatIstTime } from '../lib/format';
 import { dataAge } from '../lib/analysis';
@@ -16,6 +16,7 @@ import { SegmentedTabs } from '../components/SegmentedTabs';
 import { IconButton, Row } from '../components/ui';
 import { SummaryTile } from '../components/Charts';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { LiveChip } from '../components/LiveChip';
 import { RootStackParamList } from '../navigation/types';
 
 const SORTS: { key: SortKey; label: string }[] = [
@@ -27,13 +28,13 @@ const SORTS: { key: SortKey; label: string }[] = [
 
 export function HomeScreen({ theme }: { theme: Theme }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { refreshing, refresh, lastChecked, isWatched, toggleWatch, alerts, boardVersion } = useStore();
+  const { refreshing, refresh, isWatched, toggleWatch, alerts, boardVersion, ipos, live, boardAsOfLabel } = useStore();
   const [tab, setTab] = useState<BoardTab>('open');
   const [sort, setSort] = useState<SortKey>('closing');
 
-  const board = useMemo(() => bucketBoard(IPOT), [boardVersion]);
-  const stats = useMemo(() => boardStats(IPOT), [boardVersion]);
-  const age = useMemo(() => dataAge(), [boardVersion]);
+  const board = useMemo(() => bucketBoard(ipos), [boardVersion, ipos]);
+  const stats = useMemo(() => boardStats(ipos), [boardVersion, ipos]);
+  const age = useMemo(() => dataAge(new Date(), live.asOf ?? undefined), [boardVersion, live.asOf]);
 
   const list: IPO[] = useMemo(() => {
     const bucket = tab === 'open' ? board.open : tab === 'soon' ? board.soon : board.closed;
@@ -46,7 +47,25 @@ export function HomeScreen({ theme }: { theme: Theme }) {
 
   const header = (
     <View style={{ gap: 12 }}>
-      {age.stale ? (
+      {live.state === 'live' && live.fetchedAt ? (
+        <Animated.View
+          entering={FadeIn.duration(240)}
+          style={[styles.callout, { backgroundColor: theme.upSoft, borderColor: theme.border }]}
+        >
+          <Ionicons name="pulse-outline" size={17} color={theme.up} />
+          <Text style={{ flex: 1, fontSize: 11.5, color: theme.textSub, lineHeight: 16 }}>
+            <Text style={{ fontWeight: '800', color: theme.text }}>Live from {DATA_SOURCE_LABEL}. </Text>
+            Newest upstream stamp {boardAsOfLabel}
+            {live.updated > 0 ? ` • ${live.updated} figure${live.updated === 1 ? '' : 's'} updated` : ''}
+            {live.added > 0 ? ` • ${live.added} new issue${live.added === 1 ? '' : 's'}` : ''}. Pull down to refresh.
+          </Text>
+          <Pressable onPress={refresh} accessibilityRole="button" accessibilityLabel="Refresh from the live boards">
+            <Text style={{ fontSize: 11.5, fontWeight: '800', color: theme.primary }}>Refresh</Text>
+          </Pressable>
+        </Animated.View>
+      ) : null}
+
+      {live.state !== 'live' && age.stale ? (
         <Animated.View
           entering={FadeIn.duration(240)}
           style={[styles.callout, { backgroundColor: theme.warnSoft, borderColor: theme.border }]}
@@ -54,11 +73,13 @@ export function HomeScreen({ theme }: { theme: Theme }) {
           <Ionicons name="time-outline" size={17} color={theme.warn} />
           <Text style={{ flex: 1, fontSize: 11.5, color: theme.textSub, lineHeight: 16 }}>
             <Text style={{ fontWeight: '800', color: theme.text }}>Snapshot {age.label}. </Text>
-            Figures are exactly as {DATA_SOURCE_LABEL} recorded them on {DATA_AS_OF_LABEL}. Check the exchange
-            or registrar before bidding.
+            {live.error
+              ? `The live boards could not be reached (${live.error}), so these are exactly the figures ${DATA_SOURCE_LABEL} recorded on ${DATA_AS_OF_LABEL}.`
+              : `Figures are exactly as ${DATA_SOURCE_LABEL} recorded them on ${DATA_AS_OF_LABEL}.`}{' '}
+            Check the exchange or registrar before bidding.
           </Text>
-          <Pressable onPress={refresh} accessibilityRole="button" accessibilityLabel="Re-check the board">
-            <Text style={{ fontSize: 11.5, fontWeight: '800', color: theme.primary }}>Re-check</Text>
+          <Pressable onPress={refresh} accessibilityRole="button" accessibilityLabel="Try the live boards again">
+            <Text style={{ fontSize: 11.5, fontWeight: '800', color: theme.primary }}>Retry</Text>
           </Pressable>
         </Animated.View>
       ) : null}
@@ -172,15 +193,22 @@ export function HomeScreen({ theme }: { theme: Theme }) {
         theme={theme}
         large
         title="IPO Pulse"
-        subtitle={`Board snapshot ${DATA_AS_OF_LABEL} • checked ${formatIstTime(lastChecked)}`}
+        subtitle={
+          live.fetchedAt
+            ? `${ipos.length} issues • live ${boardAsOfLabel}`
+            : `${ipos.length} issues • snapshot ${DATA_AS_OF_LABEL}`
+        }
         right={
-          <IconButton
-            icon="notifications-outline"
-            onPress={() => navigation.navigate('Alerts')}
-            theme={theme}
-            accessibilityLabel={`Reminder log${alerts.length > 0 ? `, ${alerts.length} entries` : ', empty'}`}
-            badge={alerts.length > 0}
-          />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <LiveChip theme={theme} live={live} asOfLabel={boardAsOfLabel} onPress={refresh} />
+            <IconButton
+              icon="notifications-outline"
+              onPress={() => navigation.navigate('Alerts')}
+              theme={theme}
+              accessibilityLabel={`Reminder log${alerts.length > 0 ? `, ${alerts.length} entries` : ', empty'}`}
+              badge={alerts.length > 0}
+            />
+          </View>
         }
       />
 
@@ -251,7 +279,10 @@ export function HomeScreen({ theme }: { theme: Theme }) {
         }
         ListFooterComponent={
           <Text style={[styles.footer, { color: theme.textMuted }]}>
-            Indicative data from public trackers • grey market premiums are unofficial • not investment advice.
+            {live.fetchedAt
+              ? `Fetched from IPO Ji at ${formatIstTime(live.fetchedAt)} IST - figures move intraday.`
+              : 'Indicative data from public trackers'}{' '}
+            • grey market premiums are unofficial • not investment advice.
           </Text>
         }
       />

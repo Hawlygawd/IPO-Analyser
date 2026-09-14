@@ -4,6 +4,10 @@ An Expo (React Native + web) app for following the Indian IPO board: grey market
 category-wise subscription, the four dates that decide everything, and a plain-language read on
 each issue — plus reminders so a subscription window never slips past.
 
+Pull down on any board and the app fetches the live pages (IPO Ji's GMP board, live subscription
+report, current/upcoming issues and the event calendar), parses them and merges the numbers over
+the bundled snapshot. No connection, no problem: it falls back to the snapshot and says so.
+
 ## What it does
 
 | Screen | What it gives you |
@@ -13,7 +17,11 @@ each issue — plus reminders so a subscription window never slips past.
 | **GMP board** | Every issue ranked by grey market premium with segment filters, "quoted only" / "premium ≥ 12%" toggles, full-text search and a per-row premium bar. |
 | **IPO detail** | Price ladder (band vs implied listing price), demand score with the reasons behind it, a lot-size calculator with the ₹2 lakh retail limit, category-wise subscription bars with the 1.00x marker, key-date timeline, issue facts and the source of every figure. |
 | **Reminder log** | The reminders this app queued or delivered, plus the plan that will fire next. |
-| **Settings** | System/light/dark theme, per-milestone reminder switches, data freshness and provenance, source links, and on-device data controls. |
+| **Settings** | System/light/dark theme, per-milestone reminder switches, live-fetch status with a per-source row count, data freshness and provenance, source links, and on-device data controls. |
+
+Every screen's header carries a status chip: **Live • 5:30 PM** when the last pull reached the
+boards (with the newest upstream stamp), **Snapshot** when the app is running on bundled data.
+Tapping the chip refreshes.
 
 ## Install it on Android
 
@@ -73,18 +81,44 @@ release build type at the chosen keystore, detecting JKS vs PKCS#12 from the fil
 The generated `android/` folder is not committed - `expo prebuild` recreates it from `app.json`, so
 the icon, package name (`com.ipopulse.app`), version and permissions all stay declarative.
 
-## Honesty about the data
+## Where the numbers come from
 
-The board is a **dated snapshot**, not a live feed. Everything shown is what the tracker published
-at the snapshot time, and the app says so instead of implying real-time data:
+Two layers, in this order:
 
-- `DATA_AS_OF` in `src/lib/ipoData.ts` stamps the snapshot; the header and Settings show it, and a
-  banner appears once the snapshot is a few days old.
-- Each issue carries its own `gmpUpdated` timestamp, shown per row on the GMP board.
+1. **A live pull.** On launch, on returning to the foreground after 10 minutes, and whenever you
+   pull to refresh, `src/lib/live` downloads four public pages with a mobile user agent and parses
+   the server-rendered markup:
+
+   | Page | What is read |
+   | --- | --- |
+   | `/ipo-gmp` | one `tr.gmp-row` per tracked issue: the `data-*` attributes carry the quote, the band, the bidding window and the quote timestamp; a "no quote recorded" row clears a stale premium instead of keeping it |
+   | `/ipo-subscription-status-live-bidding-data-bse-nse` | `table.subs-overview-table` rows: QIB / NII / retail / total multiples, applications and the exchange snapshot time |
+   | `/ipo/current-ipo`, `/ipo/upcoming-ipo` | `article.ipo-card` blocks: price band, expected premium and the bidding window |
+   | `/ipo-event-calendar` | the inline `eventListData = [...]` JSON that drives the calendar: per-day events with status `OPEN` / `CLOSING` / `ALLOTMENT` / `LISTING` / `HOLIDAY` |
+
+   Live rows are matched to the snapshot by upstream slug, then by normalised name, and only the
+   fields that page actually published are overwritten. Issues that exist only live (a new SME
+   opening, say) are appended - with derived milestone dates still marked tentative.
+
+2. **The bundled snapshot.** `src/lib/ipoData.ts` ships with the app: 35 curated issues, their
+   sectors, lot sizes and issue sizes. It renders instantly on launch, survives being offline, and
+   fills in everything the live pages do not carry (sector, lot size, issue size, the written
+   analysis). `DATA_AS_OF` stamps it, and the app says *Snapshot* rather than pretending.
+
+Honesty is enforced rather than promised:
+
+- The last pull is shown with the **newest upstream stamp** (quote time, not just "now"), so a
+  5:30 PM quote and a 12:00 PM quote are never conflated.
+- A failed pull never blocks the UI: the previous pull is restored from storage on the next launch,
+  and once the bundled snapshot is a few days old a banner says so.
+- Settings lists each source with its row count and stamp, so it is obvious which board is stale.
 - There is no invented premium history: the app shows the recorded quote, the implied listing
   price and a **demand score** computed from that quote and the published subscription multiples.
-- Unconfirmed dates are marked `tentative` in the timeline, and the UI never claims to predict a
-  listing price.
+- Unconfirmed dates are marked `tentative`, and the UI never claims to predict a listing price.
+
+On the web build the browser cannot read ipoji.com directly (no CORS headers), so the web app asks
+its own origin instead - `api/ipoji.js` proxies the same four paths when the site is deployed. The
+native build fetches them directly; there is no proxy in the middle.
 
 ## Running it
 
@@ -98,10 +132,19 @@ Quality gates:
 ```bash
 npm run check:deps   # native dependencies must match the versions Expo SDK 57 ships
 npm run typecheck    # strict TS, app config + node config for scripts/tests
-npm test             # 47 unit tests (tsx --test): data integrity, formatting, analysis, board, reminders
+npm test             # 64 unit tests (tsx --test): data integrity, formatting, analysis, board, reminders, live parsing + merge
 npm run board        # prints the board as the app sees it (npm run board -- gmp for the ranking)
 npm run build:web    # static web export into dist/
 npm run smoke        # renders dist/ in jsdom and clicks through the app
+```
+
+The live parsers are tested against trimmed copies of the real upstream markup (same classes, same
+`data-*` attributes, same timestamps), and the *Live parse check* workflow runs the shipping parser
+code against the real pages on a runner whenever a `live-*` tag is pushed - the sandbox this app is
+developed in cannot reach ipoji.com:
+
+```bash
+git tag -f live-1 && git push -f origin live-1   # publishes a live-parse check run with the report
 ```
 
 `npm run check:deps` compares what is installed with `node_modules/expo/bundledNativeModules.json`.
@@ -133,7 +176,11 @@ App.tsx                     navigation shell, theme wiring, error boundary, toas
 src/theme.ts                light/dark palettes (WCAG AA checked), radii, shadows
 src/lib/
   types.ts                  IPO, Segment, Platform, SubscriptionSplit, reminder prefs
-  ipoData.ts                the curated snapshot + lookups (the only file to touch when refreshing)
+  ipoData.ts                the curated snapshot + lookups (the base data, and the offline fallback)
+  live/parse.ts             pure parsers for the upstream markup (GMP rows, subscription, cards, calendar JSON)
+  live/merge.ts             live rows over the snapshot: matching, field-level merge, new issues, stamps
+  live/sources.ts           the four URLs, user agent, timeouts, web proxy switch (no react-native import)
+  live/index.ts             pullLiveBoard(): download -> parse -> merge, plus per-source health
   format.ts                 dates, money, percentages, GMP/lot maths, IST formatting
   analysis.ts               phases, milestones, gmpSignal, demand score, insights, data freshness
   board.ts                  bucketing, sorting, search/filters, board statistics
@@ -146,8 +193,12 @@ scripts/
   board-preview.ts          prints the board the way the app sees it
   web-smoke.ts              jsdom end-to-end test over dist/ or the Metro dev bundle
   android-release.mjs       release plumbing: ABIs, Gradle heap, keystore signing
+  live-report.ts            pulls the real boards through the parser code and prints the result (CI)
+api/ipoji.js                same-origin proxy so the web build can read the boards too
 .github/workflows/
   android-apk.yml           builds the shareable APK and publishes the Release
+  verify-apk.yml            re-checks a published APK (ABIs, bundle, apksigner)
+  live-parse.yml            runs the parsers against the live boards and reports into a check run
 ```
 
 ### Design notes
@@ -161,17 +212,24 @@ scripts/
   short grace period even if the font never resolves.
 - **Accessibility:** controls are real buttons with labels and states, chips/tabs expose selection,
   the meter is a progressbar, and every colour clears WCAG AA on both its card and its soft tint.
-- **No network calls at runtime.** The snapshot ships with the app; nothing is fetched in the
-  background.
+- **The network layer never blocks a screen.** `pullLiveBoard()` is called from the store with its
+  own timeout and error capture; a failed pull keeps whatever the app already had, so the board is
+  always renderable and never shows a spinner it cannot finish.
 
-## Refreshing the snapshot
+## Updating the bundled snapshot
 
-1. Pull current figures (IPO Ji's GMP board, live subscription report and event calendar are what
-   this snapshot uses: <https://www.ipoji.com/ipo-gmp>).
+The snapshot is only the fallback now, but it is still what the app boots from and what it shows
+offline, so it should stay fresh:
+
+1. Pull current figures (IPO Ji's GMP board, live subscription report and event calendar:
+   <https://www.ipoji.com/ipo-gmp>), or copy them from a *Live parse check* run.
 2. Update `DATA_AS_OF` / `DATA_AS_OF_LABEL` and the rows in `src/lib/ipoData.ts`, keeping each
    row's `gmpUpdated` timestamp.
 3. Run `npm test` (data integrity is asserted: date ordering, unique ids, platform/segment
    consistency, https sources) and `npm run board` to eyeball the result.
+
+If upstream changes its markup, `src/lib/__tests__/live.test.ts` is where the fixture lives: paste
+the new markup, run `npm test`, and the *Live parse check* workflow will confirm it on real pages.
 
 ## Disclaimer
 

@@ -2,7 +2,7 @@ import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from '
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { radius, Theme, ThemeMode } from '../theme';
 import { useStore } from '../lib/store';
-import { DATA_AS_OF_LABEL, DATA_SOURCE_LABEL, IPOT } from '../lib/ipoData';
+import { DATA_AS_OF_LABEL, DATA_SOURCE_LABEL } from '../lib/ipoData';
 import { formatIstTime, timeAgo } from '../lib/format';
 import { dataAge } from '../lib/analysis';
 import { Button, KeyValueRow, SectionCard } from '../components/ui';
@@ -45,9 +45,12 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
     alerts,
     clearAlerts,
     showToast,
+    ipos,
+    live,
+    boardAsOfLabel,
   } = useStore();
 
-  const age = dataAge();
+  const age = dataAge(new Date(), live.asOf ?? undefined);
 
   const permLabel =
     permission === 'granted'
@@ -72,7 +75,7 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
         theme={theme}
         large
         title="Settings"
-        subtitle={`${watchlist.length} tracked • ${IPOT.length} issues in the snapshot`}
+        subtitle={`${watchlist.length} tracked • ${ipos.length} issues on the board`}
       />
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 44 }}
@@ -181,14 +184,47 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
         <SectionCard
           theme={theme}
           title="Data"
-          subtitle={age.stale ? `Snapshot is ${age.label} - figures may have moved` : `Snapshot ${age.label}`}
+          subtitle={
+            live.fetchedAt
+              ? `Live from IPO Ji - newest upstream stamp ${boardAsOfLabel}`
+              : age.stale
+                ? `Snapshot is ${age.label} - figures may have moved`
+                : `Snapshot ${age.label}`
+          }
           style={{ marginTop: 14 }}
         >
-          <KeyValueRow theme={theme} label="Board snapshot" value={DATA_AS_OF_LABEL} />
+          <KeyValueRow theme={theme} label="Data on screen" value={live.fetchedAt ? 'Live pull' : 'Bundled snapshot'} />
+          <KeyValueRow
+            theme={theme}
+            label={live.fetchedAt ? 'Newest upstream stamp' : 'Board snapshot'}
+            value={live.fetchedAt ? boardAsOfLabel : DATA_AS_OF_LABEL}
+          />
+          <KeyValueRow
+            theme={theme}
+            label="Last live fetch"
+            value={live.fetchedAt ? `${timeAgo(live.fetchedAt)} (${formatIstTime(live.fetchedAt)})` : 'not yet - tap Re-check the board'}
+          />
           <KeyValueRow theme={theme} label="Snapshot source" value={DATA_SOURCE_LABEL} multiline />
-          <KeyValueRow theme={theme} label="Issues tracked" value={String(IPOT.length)} />
+          <KeyValueRow theme={theme} label="Issues on the board" value={String(ipos.length)} />
           <KeyValueRow theme={theme} label="Last checked in app" value={`${timeAgo(lastChecked)} (${formatIstTime(lastChecked)})`} />
           <KeyValueRow theme={theme} label="Logged reminders" value={String(alerts.length)} />
+
+          {live.sources.length > 0
+            ? live.sources.map((source) => (
+                <KeyValueRow
+                  key={source.key}
+                  theme={theme}
+                  label={source.label}
+                  value={
+                    source.ok
+                      ? `${source.rows ?? 0} rows${source.asOf ? ` • ${formatIstTime(source.asOf)}` : ''}`
+                      : source.error
+                        ? `unavailable (${source.error})`
+                        : 'unavailable'
+                  }
+                />
+              ))
+            : null}
 
           <Button
             theme={theme}

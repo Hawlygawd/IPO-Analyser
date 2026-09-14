@@ -1,0 +1,46 @@
+name: Live parse check
+
+# The parsers in src/lib/live are written against the server-rendered markup of the
+# upstream boards, so they need a network path to ipoji.com. This runner has one; the
+# development sandbox does not. Push a `live-*` tag (or run the workflow by hand) to
+# pull today's pages through the shipping parser code and publish the result:
+#
+#   git tag -f live-1 && git push -f origin live-1
+#
+# A red run means the app would fall back to its bundled snapshot, and the summary shows
+# exactly which source broke.
+
+on:
+  push:
+    tags:
+      - 'live-*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  checks: write
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull the live boards through the app's own parser
+        run: npx --yes tsx@4 scripts/live-report.ts | tee report.md
+
+      - name: Publish the report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ ! -s report.md ]; then
+            printf 'live pull produced nothing - see the step log\n' > report.md
+          fi
+          head -c 60000 report.md > part-1.md
+          jq -Rs '{name: "live-parse", head_sha: env.SHA, status: "completed", conclusion: "neutral",
+                   output: {title: "Live boards parsed by the app code", summary: .}}' part-1.md > payload.json
+          gh api "repos/${{ github.repository }}/check-runs" -X POST --input payload.json >/dev/null &&
+            echo published || echo "could not publish"

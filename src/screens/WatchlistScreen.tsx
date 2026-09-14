@@ -5,13 +5,14 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { DATA_AS_OF_LABEL } from '../lib/ipoData';
+
 import { countdownLabel, daysUntil, formatDay } from '../lib/format';
 import { nextMilestone, phaseOf } from '../lib/analysis';
 import { watchlistPlan } from '../lib/reminders';
 import { IPOCard } from '../components/IPOCard';
 import { Button, Chip, EmptyState } from '../components/ui';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { LiveChip } from '../components/LiveChip';
 import { RootStackParamList } from '../navigation/types';
 
 export function WatchlistScreen({ theme }: { theme: Theme }) {
@@ -26,6 +27,8 @@ export function WatchlistScreen({ theme }: { theme: Theme }) {
     enableNotifications,
     scheduledCount,
     prefs,
+    live,
+    boardAsOfLabel,
   } = useStore();
 
   const remindersOff = prefs.openDay === false && prefs.lastDay === false && prefs.allotment === false && prefs.listing === false;
@@ -68,9 +71,10 @@ export function WatchlistScreen({ theme }: { theme: Theme }) {
         title="Watchlist"
         subtitle={
           watchedIpos.length > 0
-            ? `${watchedIpos.length} tracked • ${reminderSummary} • snapshot ${DATA_AS_OF_LABEL}`
-            : `Board snapshot ${DATA_AS_OF_LABEL}`
+            ? `${watchedIpos.length} tracked • ${reminderSummary} • ${live.fetchedAt ? 'live' : 'snapshot'} ${boardAsOfLabel}`
+            : `${live.fetchedAt ? 'Live' : 'Board snapshot'} ${boardAsOfLabel}`
         }
+        right={<LiveChip theme={theme} live={live} asOfLabel={boardAsOfLabel} onPress={refresh} />}
       />
 
       {watchedIpos.length === 0 ? (

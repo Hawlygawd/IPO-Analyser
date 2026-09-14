@@ -194,8 +194,11 @@ async function main() {
   for (let i = 0; i < 80; i += 1) {
     await settle(100);
     // the boot splash paints first, so wait for the board itself rather than the app name
-    if (textOf('#root').includes('Board snapshot')) break;
+    // (the subtitle reads "35 issues • live ..." or "... • snapshot ..." depending on the pull)
+    const text = textOf('#root');
+    if (/issues • (live|snapshot)/.test(text) && !text.includes('Updating')) break;
   }
+
 
   /**
    * Finds an interactive control. Accessibility labels win over plain text: several screens
@@ -235,11 +238,24 @@ async function main() {
     return tap(target!);
   };
 
+  // The store's first live pull lands a moment after the first paint and re-renders the board,
+  // replacing the nodes behind it. Let it finish, then wait for a tab node that survives a
+  // render before interacting - otherwise the first tap is dispatched into a detached node.
+  await settle(1200);
+  let tabNode = find('Soon', false);
+  for (let i = 0; i < 20; i += 1) {
+    await settle(150);
+    const next = find('Soon', false);
+    if (next && next === tabNode) break;
+    tabNode = next;
+  }
+
   /* ------------------------------------------------------------- first paint */
   const root = textOf('#root');
   assert.ok(root.length > 200, `the app rendered almost nothing (${root.length} chars)`);
   assert.match(root, /IPO Pulse/, 'header title did not render');
-  assert.match(root, /Board snapshot/, 'snapshot subtitle did not render');
+  assert.match(root, /issues • (live|snapshot)/, 'the data-status line did not render');
+  assert.match(root, /(Live • |Snapshot)/, 'the data-status chip did not render');
   assert.match(root, /Bidding now/, 'summary tiles did not render');
   assert.match(root, /Open now/, 'no "Open now" phase chip rendered');
   assert.match(root, /Closes /, 'no closing-date line rendered on the cards');
@@ -258,7 +274,16 @@ async function main() {
   await settle(400);
   assert.match(textOf('#root'), /Opening soon|Quanto Agroworld/, 'the Soon tab did not render any rows');
   const card = find('NSE (National Stock Exchange), ', false);
-  assert.ok(card, 'could not find the NSE card on the board');
+  assert.ok(
+    card,
+    `could not find the NSE card on the board. Card labels rendered: ${
+      [...window.document.querySelectorAll('[aria-label]')]
+        .map((el) => el.getAttribute('aria-label') ?? '')
+        .filter((label) => / IPO\./.test(label))
+        .slice(0, 6)
+        .join(' | ') || '(none)'
+    }`
+  );
   tap(card!);
   await settle(600);
 

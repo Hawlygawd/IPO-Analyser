@@ -16,7 +16,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { getIpo, DATA_AS_OF_LABEL } from '../lib/ipoData';
+import { DATA_SOURCE_LABEL } from '../lib/ipoData';
 import {
   formatCr,
   formatDay,
@@ -54,10 +54,11 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'IPODetail'>>();
   const insets = useSafeAreaInsets();
-  const { isWatched, toggleWatch, permission, showToast, enableNotifications } = useStore();
+  const { isWatched, toggleWatch, permission, showToast, enableNotifications, findIpo, boardAsOfLabel, live } =
+    useStore();
   const [lots, setLots] = useState(1);
 
-  const ipo = getIpo(route.params.id);
+  const ipo = findIpo(route.params.id);
 
   const analysis = useMemo(() => {
     if (!ipo) return null;
@@ -97,7 +98,7 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
       : 'No grey market quote recorded',
     listing != null ? `Indicative listing ${formatRupees(listing)}` : null,
     `${dateLine(ipo)} • source: ${ipo.sourceName}`,
-    `Shared from IPO Pulse (snapshot ${DATA_AS_OF_LABEL})`,
+    `Shared from IPO Pulse (${live.fetchedAt ? 'live' : 'snapshot'} ${boardAsOfLabel})`,
   ]
     .filter(Boolean)
     .join('\n');
@@ -402,7 +403,12 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
         <Animated.View entering={FadeInDown.delay(210).duration(300)}>
           <SectionCard theme={theme} title="Where this came from" style={{ marginTop: 14 }}>
             <KeyValueRow theme={theme} label="Source" value={ipo.sourceName} />
-            <KeyValueRow theme={theme} label="Board snapshot" value={DATA_AS_OF_LABEL} />
+            <KeyValueRow
+              theme={theme}
+              label={live.fetchedAt ? 'Last live update' : 'Board snapshot'}
+              value={live.fetchedAt ? `${boardAsOfLabel} (${DATA_SOURCE_LABEL})` : boardAsOfLabel}
+              multiline
+            />
             {ipo.gmpUpdated ? (
               <KeyValueRow theme={theme} label="GMP quote recorded" value={`${formatIstTime(ipo.gmpUpdated)} IST`} />
             ) : null}

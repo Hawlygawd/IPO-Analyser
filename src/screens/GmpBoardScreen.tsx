@@ -6,7 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { IPOT, DATA_AS_OF_LABEL } from '../lib/ipoData';
+import { DATA_AS_OF_LABEL } from '../lib/ipoData';
 import { formatIstTime, formatPct, formatRupees, gmpPercent } from '../lib/format';
 import {
   GmpToggles,
@@ -22,6 +22,7 @@ import { Avatar, EmptyState } from '../components/ui';
 import { PremiumBar, SummaryTile, premiumTone } from '../components/Charts';
 import { SegmentedTabs } from '../components/SegmentedTabs';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { LiveChip } from '../components/LiveChip';
 import { RootStackParamList } from '../navigation/types';
 
 const SORT_LABELS: { key: SortKey; label: string }[] = [
@@ -33,21 +34,21 @@ const SORT_LABELS: { key: SortKey; label: string }[] = [
 
 export function GmpBoardScreen({ theme }: { theme: Theme }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { isWatched, toggleWatch, refresh, refreshing } = useStore();
+  const { isWatched, toggleWatch, refresh, refreshing, ipos, live, boardAsOfLabel } = useStore();
   const [query, setQuery] = useState('');
   const [segment, setSegment] = useState<SegmentFilter>('all');
   const [toggles, setToggles] = useState<GmpToggles>({ quotedOnly: false, strongOnly: false });
   const [sort, setSort] = useState<SortKey>('premium');
 
-  const stats = useMemo(() => gmpBoardStats(IPOT), []);
-  const mainboardCount = useMemo(() => IPOT.filter((i) => i.segment === 'Mainboard').length, []);
+  const stats = useMemo(() => gmpBoardStats(ipos), [ipos]);
+  const mainboardCount = useMemo(() => ipos.filter((i) => i.segment === 'Mainboard').length, [ipos]);
 
   const rows = useMemo(() => {
-    const filtered = IPOT.filter(
+    const filtered = ipos.filter(
       (ipo) => matchesQuery(ipo, query) && matchesSegment(ipo, segment) && matchesToggles(ipo, toggles)
     );
     return sortIpos(filtered, sort);
-  }, [query, segment, toggles, sort]);
+  }, [ipos, query, segment, toggles, sort]);
 
   const toggle = (key: keyof GmpToggles) => setToggles((prev) => ({ ...prev, [key]: !prev[key] }));
 
@@ -59,7 +60,12 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
         theme={theme}
         large
         title="GMP board"
-        subtitle={`Unofficial grey market quotes • snapshot ${DATA_AS_OF_LABEL}`}
+        subtitle={
+          live.fetchedAt
+            ? `Unofficial grey market quotes • live ${boardAsOfLabel}`
+            : `Unofficial grey market quotes • snapshot ${DATA_AS_OF_LABEL}`
+        }
+        right={<LiveChip theme={theme} live={live} asOfLabel={boardAsOfLabel} onPress={refresh} />}
       />
 
       <View style={{ paddingHorizontal: 16, gap: 10, paddingBottom: 12 }}>
@@ -119,9 +125,9 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
           onChange={setSegment}
           accessibilityLabel="Filter the GMP board by segment"
           options={[
-            { key: 'all', label: 'All', count: IPOT.length },
+            { key: 'all', label: 'All', count: ipos.length },
             { key: 'mainboard', label: 'Mainboard', count: mainboardCount },
-            { key: 'sme', label: 'SME', count: IPOT.length - mainboardCount },
+            { key: 'sme', label: 'SME', count: ipos.length - mainboardCount },
           ]}
         />
 

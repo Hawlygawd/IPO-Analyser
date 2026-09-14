@@ -8,11 +8,17 @@ import React, {
   useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useColorScheme } from 'react-native';
+import { AppState, Platform, useColorScheme } from 'react-native';
 import { AlertLogItem, NotifPrefs, IPO } from './types';
 import { ThemeMode } from '../theme';
 import { darkTheme, lightTheme, Theme } from '../theme';
-import { getIpo, DATA_AS_OF_LABEL } from './ipoData';
+import { IPOT, DATA_AS_OF, DATA_AS_OF_LABEL } from './ipoData';
+import {
+  pullLiveBoard,
+  istLabel,
+  type LiveBoard,
+  type LiveSourceStatus,
+} from './live';
 import {
   buildReminders,
   cancelIds,
@@ -29,8 +35,24 @@ const KEY_ALERTS = '@ipo_pulse/alerts';
 const KEY_THEME = '@ipo_pulse/theme';
 const KEY_IDS = '@ipo_pulse/notif_ids';
 const KEY_CHECKED = '@ipo_pulse/last_checked';
+const KEY_LIVE = '@ipo_pulse/live';
 
 export type PermissionState = 'granted' | 'denied' | 'undetermined' | 'unsupported';
+export type LiveState = 'idle' | 'loading' | 'live' | 'offline';
+
+export interface LiveInfo {
+  state: LiveState;
+  /** when the last successful pull finished */
+  fetchedAt: number | null;
+  /** newest upstream stamp we could prove (quote time), ISO */
+  asOf: string | null;
+  error: string | null;
+  /** figures that changed on the last pull */
+  updated: number;
+  /** issues the last pull discovered */
+  added: number;
+  sources: LiveSourceStatus[];
+}
 export type ToastTone = 'info' | 'up' | 'down' | 'warn';
 
 export interface Toast {
@@ -49,6 +71,14 @@ interface StoreValue {
   theme: Theme;
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
+  /** the board the screens render: bundled snapshot with any live pull merged over it */
+  ipos: IPO[];
+  findIpo: (id: string) => IPO | undefined;
+  /** newest upstream stamp behind `ipos`, ISO */
+  boardAsOf: string;
+  /** human label for `boardAsOf`, e.g. "14 Sep 2026, 5:30 PM IST" */
+  boardAsOfLabel: string;
+  live: LiveInfo;
   watchlist: string[];
   watchedIpos: IPO[];
   isWatched: (id: string) => boolean;
@@ -93,15 +123,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [permission, setPermission] = useState<PermissionState>('undetermined');
   const [scheduledCount, setScheduledCount] = useState(0);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [board, setBoard] = useState<IPO[]>(IPOT);
+  const [boardAsOf, setBoardAsOf] = useState<string>(DATA_AS_OF);
+  const [liveState, setLiveState] = useState<LiveState>('idle');
+  const [liveFetchedAt, setLiveFetchedAt] = useState<number | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [liveUpdated, setLiveUpdated] = useState(0);
+  const [liveAdded, setLiveAdded] = useState(0);
+  const [liveSources, setLiveSources] = useState<LiveSourceStatus[]>([]);
 
   // refs mirror the state the async notification code needs to read
   const notifIds = useRef<Record<string, string[]>>({});
   const watchlistRef = useRef<string[]>([]);
   const prefsRef = useRef<NotifPrefs>(DEFAULT_PREFS);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const boardRef = useRef<IPO[]>(IPOT);
+  const liveFetchedRef = useRef<number | null>(null);
+  const pullingRef = useRef(false);
 
   watchlistRef.current = watchlist;
   prefsRef.current = prefs;
+  boardRef.current = board;
+  liveFetchedRef.current = liveFetchedAt;
+
+  /** Looks the issue up in the live board first, then in the bundled snapshot. */
+  const findIpo = useCallback(
+    (id: string) => boardRef.current.find((ipo) => ipo.id === id) ?? IPOT.find((ipo) => ipo.id === id),
+    []
+  );
 
   const persist = useCallback(async (key: string, value: unknown) => {
     try {
@@ -150,13 +199,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           KEY_THEME,
           KEY_IDS,
           KEY_CHECKED,
+          KEY_LIVE,
         ]);
         const map: Record<string, string | null> = Object.fromEntries(stored);
         if (map[KEY_WATCH]) {
           const parsed = JSON.parse(map[KEY_WATCH]);
           if (Array.isArray(parsed)) {
             // drop any ids that are no longer on the board
-            const clean = parsed.filter((id: string) => Boolean(getIpo(id)));
+            const clean = parsed.filter((id: string) => Boolean(findIpo(id)));
             setWatchlist(clean);
             watchlistRef.current = clean;
           }
@@ -166,6 +216,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (map[KEY_THEME]) setThemeModeState(JSON.parse(map[KEY_THEME]));
         if (map[KEY_IDS]) notifIds.current = JSON.parse(map[KEY_IDS]);
         if (map[KEY_CHECKED]) setLastChecked(Number(map[KEY_CHECKED]) || Date.now());
+        if (map[KEY_LIVE]) {
+          // last successful pull: show it immediately, the network call below replaces it
+          const cached = JSON.parse(map[KEY_LIVE]) as LiveBoard;
+          if (Array.isArray(cached?.ipos) && cached.ipos.length > 0 && cached.fetchedAt) {
+            boardRef.current = cached.ipos;
+            liveFetchedRef.current = cached.fetchedAt;
+            setBoard(cached.ipos);
+            setBoardAsOf(cached.asOf ?? DATA_AS_OF);
+            setLiveFetchedAt(cached.fetchedAt);
+            setLiveUpdated(cached.updated ?? 0);
+            setLiveAdded(cached.added ?? 0);
+            setLiveSources(cached.sources ?? []);
+            setLiveState('live');
+          }
+        }
       } catch {
         // start fresh on any storage error
       }
@@ -176,7 +241,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setScheduledCount(idCount);
       setReady(true);
     })();
-  }, []);
+  }, [findIpo]);
 
   /* ------------------------------------------------------- reminder sync */
 
@@ -272,7 +337,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const all: Record<string, string[]> = {};
       let count = 0;
       for (const id of watchlistRef.current) {
-        const ipo = getIpo(id);
+        const ipo = findIpo(id);
         if (!ipo) continue;
         await cancelIds(notifIds.current[id] ?? []);
         const { ids } = await scheduleForIpo(ipo, effective);
@@ -348,7 +413,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = subscribeToDelivered(({ ipoId, title, body }) => {
       logAlert({
         ipoId: ipoId ?? '-',
-        ipoName: getIpo(ipoId ?? '')?.name ?? 'Reminder',
+        ipoName: findIpo(ipoId ?? '')?.name ?? 'Reminder',
         kind: 'scheduled',
         title,
         body,
@@ -378,18 +443,100 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [persist]);
 
   /**
-   * Recomputes the board. The dataset is a bundled snapshot - there is no live feed to
-   * poll - so this re-derives every date-dependent value and records when it ran.
+   * Pulls the four upstream pages, merges them over the snapshot and caches the result.
+   * `silent` is used for the boot/foreground refresh: it never interrupts with a toast.
+   */
+  const pullLive = useCallback(
+    async (silent: boolean): Promise<boolean> => {
+      if (pullingRef.current) return false;
+      pullingRef.current = true;
+      setLiveState('loading');
+      try {
+        const { board: next } = await pullLiveBoard(IPOT, { useProxy: Platform.OS === 'web' });
+        boardRef.current = next.ipos;
+        liveFetchedRef.current = next.fetchedAt;
+        setBoard(next.ipos);
+        setBoardAsOf(next.asOf);
+        setLiveFetchedAt(next.fetchedAt);
+        setLiveUpdated(next.updated);
+        setLiveAdded(next.added);
+        setLiveSources(next.sources);
+        setLiveError(null);
+        setLiveState('live');
+        setBoardVersion((version) => version + 1);
+        const at = Date.now();
+        setLastChecked(at);
+        persist(KEY_CHECKED, at);
+        persist(KEY_LIVE, next);
+        if (!silent) {
+          const parts = [
+            `Live data • ${istLabel(next.asOf)}`,
+            next.updated > 0 ? `${next.updated} updated` : 'no figure moved',
+            next.added > 0 ? `${next.added} new` : null,
+          ].filter(Boolean);
+          showToast(parts.join(' • '), 'up');
+          logAlert({
+            ipoId: '-',
+            ipoName: 'Live update',
+            kind: 'system',
+            title: `Board refreshed from IPO Ji`,
+            body: `${next.updated} of ${next.ipos.length} issues changed, ${next.added} new. Newest upstream stamp ${istLabel(
+              next.asOf
+            )}.`,
+          });
+        }
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setLiveError(message);
+        setLiveState(liveFetchedRef.current ? 'live' : 'offline');
+        if (!silent) {
+          showToast(`Could not reach the live boards (${message}) - showing the saved snapshot`, 'warn');
+        }
+        return false;
+      } finally {
+        pullingRef.current = false;
+      }
+    },
+    [logAlert, persist, showToast]
+  );
+
+  /**
+   * User-initiated refresh: pull the live boards, and fall back to re-deriving the
+   * bundled snapshot (dates, phases) when the device is offline.
    */
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    const at = Date.now();
-    setLastChecked(at);
-    setBoardVersion((v) => v + 1);
-    await persist(KEY_CHECKED, at);
+    const ok = await pullLive(false);
+    if (!ok) {
+      setBoardVersion((version) => version + 1);
+      const at = Date.now();
+      setLastChecked(at);
+      await persist(KEY_CHECKED, at);
+    }
     setRefreshing(false);
-    showToast(`Board re-checked • data snapshot of ${DATA_AS_OF_LABEL}`, 'info');
-  }, [persist, showToast]);
+  }, [persist, pullLive]);
+
+  /** First pull after boot, then one per foreground return when the data has aged. */
+  useEffect(() => {
+    if (!ready) return;
+    // Let the first frame settle before the pull re-renders the board: a network call that
+    // lands mid-paint costs more than the milliseconds it saves.
+    const timer = setTimeout(() => {
+      pullLive(true).catch(() => undefined);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [pullLive, ready]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      const last = liveFetchedRef.current;
+      if (last && Date.now() - last < 10 * 60 * 1000) return;
+      pullLive(true).catch(() => undefined);
+    });
+    return () => subscription.remove();
+  }, [pullLive]);
 
   const theme = useMemo(() => {
     const resolved = themeMode === 'system' ? (systemScheme ?? 'light') : themeMode;
@@ -397,9 +544,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [themeMode, systemScheme]);
 
   const watchedIpos = useMemo(
-    () => watchlist.map((id) => getIpo(id)).filter((x): x is IPO => Boolean(x)),
-    [watchlist]
+    () => watchlist.map((id) => findIpo(id)).filter((x): x is IPO => Boolean(x)),
+    [findIpo, watchlist]
   );
+
+  const live = useMemo<LiveInfo>(
+    () => ({
+      state: liveState,
+      fetchedAt: liveFetchedAt,
+      asOf: liveFetchedAt ? boardAsOf : null,
+      error: liveError,
+      updated: liveUpdated,
+      added: liveAdded,
+      sources: liveSources,
+    }),
+    [boardAsOf, liveAdded, liveError, liveFetchedAt, liveSources, liveState, liveUpdated]
+  );
+
+  const boardAsOfLabel = liveFetchedAt ? istLabel(boardAsOf) : DATA_AS_OF_LABEL;
 
   const value = useMemo<StoreValue>(
     () => ({
@@ -410,6 +572,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       theme,
       themeMode,
       setThemeMode,
+      ipos: board,
+      findIpo,
+      boardAsOf,
+      boardAsOfLabel,
+      live,
       watchlist,
       watchedIpos,
       isWatched: (id: string) => watchlist.includes(id),
@@ -435,6 +602,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       theme,
       themeMode,
       setThemeMode,
+      board,
+      boardAsOf,
+      boardAsOfLabel,
+      findIpo,
+      live,
       watchlist,
       watchedIpos,
       toggleWatch,

@@ -450,9 +450,9 @@ export interface DataAge {
   label: string;
 }
 
-/** How old the bundled snapshot is - surfaced in the UI instead of pretending it is live. */
-export function dataAge(now = new Date()): DataAge {
-  const asOf = new Date(DATA_AS_OF);
+/** How old the data on screen is - surfaced instead of pretending a snapshot is live. */
+export function dataAge(now = new Date(), asOfIso: string = DATA_AS_OF): DataAge {
+  const asOf = new Date(asOfIso);
   const days = Math.max(0, Math.round((now.getTime() - asOf.getTime()) / 86400000));
   const stale = days >= 3;
   const label = days === 0 ? 'updated today' : days === 1 ? '1 day old' : `${days} days old`;
