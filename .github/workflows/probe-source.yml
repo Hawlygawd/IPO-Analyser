@@ -1,9 +1,9 @@
 name: Probe source
 
-# Temporary reconnaissance: fetches the upstream IPO pages from a GitHub runner (which has open
-# internet, unlike the sandbox) and mirrors what came back into a check run so the result is
-# readable through the API. Answers one question: what is the most robust thing to parse -
-# embedded JSON, or the table markup?
+# Temporary reconnaissance. The sandbox this app is developed in cannot reach the upstream site
+# (its egress allows npm and GitHub only), so a runner fetches the pages and mirrors the markup
+# that has to be parsed into a check run, which the API serves. Delete once the feed parser and
+# its fixtures are in place.
 
 on:
   push:
@@ -26,56 +26,82 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p pages
-          : > report.md
           UA="Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
-          i=0
-          for url in \
-            "https://www.ipoji.com/ipo-gmp" \
-            "https://www.ipoji.com/ipo-subscription-status-live-bidding-data-bse-nse" \
-            "https://www.ipoji.com/ipo/current-ipo" \
-            "https://www.ipoji.com/ipo/upcoming-ipo" \
-            "https://www.ipoji.com/ipo-event-calendar" ; do
-            i=$((i+1))
-            name="page-${i}"
-            code=$(curl -sS -L -A "$UA" -H "Accept-Language: en-IN,en;q=0.9" \
-                     -o "pages/${name}.html" -w '%{http_code}' --max-time 30 "$url" || echo "000")
-            size=$(wc -c < "pages/${name}.html" 2>/dev/null || echo 0)
-            {
-              echo "## ${url}"
-              echo "- status: ${code}, bytes: ${size}"
-              echo "- next_data: $(grep -c '__NEXT_DATA__' "pages/${name}.html" || true)   json_scripts: $(grep -o 'type=\"application/json\"' "pages/${name}.html" | wc -l)   tables: $(grep -o '<table' "pages/${name}.html" | wc -l)"
-              echo "- api paths in source: $(grep -oE '\"/api/[a-zA-Z0-9/_-]+' "pages/${name}.html" | sort -u | head -8 | tr '\n' ' ')"
-              echo "- title: $(grep -oE '<title>[^<]*' "pages/${name}.html" | head -1)"
-              echo
-              if [ "$size" -gt 1000 ]; then
-                echo "### first 2500 chars of the parsed-looking markup (scripts stripped)"
-                sed 's/<script[^>]*>.*<\/script>//g' "pages/${name}.html" | tr -s ' \n' ' ' | cut -c1-2500
-                echo
-                echo
-                echo "### json-ish script blocks"
-                grep -oE 'type="application/json"[^>]*>.{0,400}' "pages/${name}.html" | head -4
-                echo
-              fi
-              echo "---"
-              echo
-            } >> report.md
-          done
-          wc -c report.md
+          curl -sS -L -A "$UA" -o pages/gmp.html --max-time 30 "https://www.ipoji.com/ipo-gmp"
+          curl -sS -L -A "$UA" -o pages/subscription.html --max-time 30 "https://www.ipoji.com/ipo-subscription-status-live-bidding-data-bse-nse"
+          curl -sS -L -A "$UA" -o pages/current.html --max-time 30 "https://www.ipoji.com/ipo/current-ipo"
+          curl -sS -L -A "$UA" -o pages/upcoming.html --max-time 30 "https://www.ipoji.com/ipo/upcoming-ipo"
+          curl -sS -L -A "$UA" -o pages/calendar.html --max-time 30 "https://www.ipoji.com/ipo-event-calendar"
+          ls -l pages
 
-      - name: Publish the report
+      - name: Extract the structures worth parsing
+        run: |
+          node - <<'NODE' > excerpt.md
+          const fs = require('node:fs');
+          const read = (p) => fs.readFileSync(`pages/${p}`, 'utf8');
+          const out = [];
+          const cap = (s, n) => (s.length > n ? `${s.slice(0, n)}\n…[truncated ${s.length - n} chars]` : s);
+
+          // 1. every table on the GMP page, with the class names that identify it
+          const gmp = read('gmp.html');
+          const tables = [...gmp.matchAll(/<table[\s\S]*?<\/table>/g)].map((m) => m[0]);
+          out.push(`# GMP page: ${tables.length} table(s), ${gmp.length} bytes`);
+          tables.forEach((t, i) => {
+            const cls = /<table[^>]*class="([^"]*)"/.exec(t)?.[1] ?? '(no class)';
+            const rows = (t.match(/<tr/g) ?? []).length;
+            out.push(`\n## table ${i} class="${cls}" rows=${rows} length=${t.length}\n`);
+            out.push(cap(t, 30000));
+          });
+
+          // 2. the first two subscription tables, plus the heading each one sits under
+          const sub = read('subscription.html');
+          const subTables = [...sub.matchAll(/<table[\s\S]*?<\/table>/g)].map((m) => m[0]);
+          out.push(`\n\n# Subscription page: ${subTables.length} table(s)`);
+          subTables.slice(0, 2).forEach((t, i) => {
+            const at = sub.indexOf(t);
+            out.push(`\n## subscription table ${i} length=${t.length}\n`);
+            out.push('### context before it\n');
+            out.push(cap(sub.slice(Math.max(0, at - 900), at), 900));
+            out.push('\n### table\n');
+            out.push(cap(t, 8000));
+          });
+          const headings = [...sub.matchAll(/<h[23][^>]*>([\s\S]{0,120}?)<\/h[23]>/g)].map((m) => m[1].replace(/<[^>]*>/g, '').trim());
+          out.push(`\n### all h2/h3 headings: ${JSON.stringify(headings.slice(0, 40))}`);
+
+          // 3. one card from the current-ipo page and one from upcoming
+          for (const [label, file, anchor] of [
+            ['current-ipo', 'current.html', /Veegaland/],
+            ['upcoming-ipo', 'upcoming.html', /NSE/],
+          ]) {
+            const html = read(file);
+            const at = html.search(anchor);
+            out.push(`\n\n# ${label} page (${html.length} bytes), anchor at ${at}`);
+            out.push(cap(html.slice(Math.max(0, at - 2500), at + 2500), 5000));
+          }
+
+          // 4. the calendar markup around the first day cell
+          const cal = read('calendar.html');
+          const calAt = cal.search(/event-calendar|calendar-day|data-date/i);
+          out.push(`\n\n# calendar page (${cal.length} bytes), structure anchor at ${calAt}`);
+          out.push(cap(cal.slice(Math.max(0, calAt - 500), calAt + 4500), 5000));
+
+          console.log(out.join('\n'));
+          NODE
+          wc -c excerpt.md
+
+      - name: Publish the excerpt
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
         run: |
+          head -c 60000 excerpt.md > part-1.md
           jq -Rs '{name: "source-probe", head_sha: env.SHA, status: "completed", conclusion: "neutral",
-                   output: {title: "Upstream source reconnaissance", summary: .}}' report.md > payload.json
+                   output: {title: "Upstream markup worth parsing (part 1)", summary: .}}' part-1.md > payload.json
           gh api "repos/${{ github.repository }}/check-runs" -X POST --input payload.json >/dev/null &&
-            echo published || echo "could not publish"
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: probe-pages
-          path: pages/
-          if-no-files-found: warn
+            echo published part 1 || echo "could not publish part 1"
+          # keep the whole excerpt as a second check run so nothing is lost to the size cap
+          jq -Rs '{name: "source-probe-2", head_sha: env.SHA, status: "completed", conclusion: "neutral",
+                   output: {title: "Upstream markup worth parsing (part 2)", summary: .}}' excerpt.md > payload2.json
+          gh api "repos/${{ github.repository }}/check-runs" -X POST --input payload2.json >/dev/null &&
+            echo published part 2 || echo "could not publish part 2"
