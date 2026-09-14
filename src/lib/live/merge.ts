@@ -16,6 +16,7 @@ import { IPO, Platform, Segment, MilestoneKey } from '../types';
 import { addDays, parseISO } from '../format';
 import type {
   LiveAiRow,
+  LiveAltGmpRow,
   LiveCalendarDay,
   LiveCalendarEvent,
   LiveCard,
@@ -24,7 +25,7 @@ import type {
   ParsedLive,
 } from './parse';
 
-export type LiveSourceKey = 'gmp' | 'subscription' | 'calendar' | 'cards' | 'ai';
+export type LiveSourceKey = 'gmp' | 'gmpAlt' | 'subscription' | 'calendar' | 'cards' | 'ai';
 
 export interface LiveSourceStatus {
   key: LiveSourceKey;
@@ -53,6 +54,7 @@ export interface LiveBoard {
 
 export const SOURCE_LABELS: Record<LiveSourceKey, string> = {
   gmp: 'GMP board',
+  gmpAlt: 'IPO Market GMP (30-min refresh)',
   subscription: 'Live subscription report',
   calendar: 'Event calendar',
   cards: 'Current & upcoming issues',
@@ -129,8 +131,19 @@ const MILESTONE_BY_STATUS: Record<string, MilestoneKey> = {
   LISTED: 'listing',
 };
 
+/**
+ * Names printed next to a quote so the screen can say where the number came from. A quote
+ * from the 30-minute source is fresher, not better - the source is part of the figure.
+ */
+export const GMP_SOURCE_LABELS = {
+  ipoji: 'IPO Ji',
+  alt: 'IPO Market',
+} as const;
+
 interface LiveRow {
   gmp?: LiveGmpParse['rows'][number];
+  /** the same quote as published by the 30-minute source, applied only when it is newer */
+  alt?: LiveAltGmpRow;
   sub?: LiveSubscriptionRow;
   card?: LiveCard;
   /** figures the AI assist found; the lowest-precedence source by design */
@@ -158,6 +171,15 @@ export function mergeBoard(
   for (const row of live.gmp.rows) {
     const ipo = match(row.id, row.name);
     if (ipo) rowFor(ipo).gmp = row;
+  }
+
+  for (const row of live.gmpAlt.rows) {
+    const ipo = match(row.slug ?? '', row.name);
+    if (!ipo) continue;
+    const slot = rowFor(ipo);
+    const held = slot.alt?.updatedAt ? new Date(slot.alt.updatedAt).getTime() : 0;
+    const candidate = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+    if (!slot.alt || candidate >= held) slot.alt = row;
   }
 
   for (const row of live.subscription.rows) {
@@ -194,7 +216,9 @@ export function mergeBoard(
     if (!row) return ipo;
     const next = applyLive(ipo, row);
     if (next.aiFilled && !ipo.aiFilled) aiApplied += 1;
-    if (!sameIpo(ipo, next)) updated += 1;
+    // `updated` counts the issues whose figures actually moved on this pull - the Home
+    // callout and the toast show that number, so it must not count rows that stood still.
+    if (figuresDiffer(ipo, next)) updated += 1;
     return next;
   });
 
@@ -298,6 +322,7 @@ function applyLive(ipo: IPO, row: LiveRow): IPO {
     const gmp = row.gmp;
     next.gmp = gmp.gmp;
     next.gmpUpdated = gmp.gmp !== undefined ? gmp.updatedAt ?? ipo.gmpUpdated : undefined;
+    next.gmpSource = gmp.gmp !== undefined ? GMP_SOURCE_LABELS.ipoji : null;
     byAi.delete('gmp');
     if (gmp.bandLow !== undefined) {
       next.priceBandLow = gmp.bandLow;
@@ -317,6 +342,26 @@ function applyLive(ipo: IPO, row: LiveRow): IPO {
     }
     if (gmp.platform) next.platform = gmp.platform as Platform;
     if (gmp.segment) next.segment = gmp.segment as Segment;
+  }
+
+  /**
+   * The 30-minute source, applied last and only where it is strictly newer than whatever is
+   * already on the screen. IPO Ji posts one quote in the evening; this one keeps a stamp per
+   * row, so on a phone at 9 PM the newer quote is the honest one to show - with its source.
+   */
+  if (row.alt && row.alt.gmp !== undefined) {
+    const altMs = row.alt.updatedAt ? new Date(row.alt.updatedAt).getTime() : Number.NaN;
+    const heldMs = next.gmpUpdated ? new Date(next.gmpUpdated).getTime() : Number.NaN;
+    const newer = Number.isFinite(altMs) && (!Number.isFinite(heldMs) || altMs > heldMs);
+    // a quote with no stamp at all can only fill a field nothing else filled
+    const fills = !Number.isFinite(altMs) && next.gmp === undefined;
+    if (newer || fills) {
+      next.gmp = row.alt.gmp;
+      if (row.alt.updatedAt) next.gmpUpdated = row.alt.updatedAt;
+      next.gmpSource = GMP_SOURCE_LABELS.alt;
+    }
+    if (next.priceBandLow === undefined && row.alt.bandLow !== undefined) next.priceBandLow = row.alt.bandLow;
+    if (next.priceBandHigh === undefined && row.alt.bandHigh !== undefined) next.priceBandHigh = row.alt.bandHigh;
   }
 
   if (row.card && !row.gmp) {
@@ -442,7 +487,8 @@ export function istLabel(iso: string): string {
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-function sameIpo(a: IPO, b: IPO): boolean {
+/** True when a live merge moved any figure the board displays for this issue. */
+function figuresDiffer(a: IPO, b: IPO): boolean {
   const fields: (keyof IPO)[] = [
     'gmp',
     'gmpUpdated',

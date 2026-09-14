@@ -41,6 +41,12 @@ export interface IPO {
   gmpUpdated?: string;
   subscription?: SubscriptionSplit;
   /**
+   * Who published the grey market premium currently on screen ('IPO Ji' when the board page
+   * carried it, 'IPO Market' when the 30-minute source had a newer quote). Null when the
+   * figure was withdrawn upstream.
+   */
+  gmpSource?: string | null;
+  /**
    * True when at least one figure on this issue came from the AI assist rather than from a
    * published page - the UI says so instead of passing it off as board data.
    */

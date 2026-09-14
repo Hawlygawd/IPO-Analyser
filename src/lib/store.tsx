@@ -505,7 +505,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // without a single premium or subscription figure to show.
         const thin =
           !direct ||
-          (direct.parsed.gmp.rows.length === 0 && direct.parsed.subscription.rows.length === 0);
+          (direct.parsed.gmp.rows.length === 0 &&
+            direct.parsed.gmpAlt.rows.length === 0 &&
+            direct.parsed.subscription.rows.length === 0);
         let search: AiSearchResult | null = null;
         if (armed && (thin || options.forceAi)) {
           search = await aiBoardSearch(IPOT, {

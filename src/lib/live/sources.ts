@@ -17,6 +17,11 @@ export const MOBILE_UA =
 
 export const LIVE_URLS = {
   gmp: 'https://www.ipoji.com/ipo-gmp',
+  /**
+   * The second GMP source. IPO Ji publishes one evening quote; this one refreshes every 30
+   * minutes and stamps every row, so the board can carry the newest number anyone published.
+   */
+  gmpAlt: 'https://ipomarket.in/gmp/',
   subscription: 'https://www.ipoji.com/ipo-subscription-status-live-bidding-data-bse-nse',
   current: 'https://www.ipoji.com/ipo/current-ipo',
   upcoming: 'https://www.ipoji.com/ipo/upcoming-ipo',

@@ -520,6 +520,8 @@ export function extractInlineArray(html: string, name: string): string | undefin
 
 export interface LivePages {
   gmp?: string;
+  /** the second GMP source (ipomarket.in), which stamps every row and refreshes every 30 min */
+  gmpAlt?: string;
   subscription?: string;
   calendar?: string;
   current?: string;
@@ -528,6 +530,7 @@ export interface LivePages {
 
 export interface ParsedLive {
   gmp: LiveGmpParse;
+  gmpAlt: LiveAltGmpParse;
   subscription: { rows: LiveSubscriptionRow[]; asOf?: string };
   cards: LiveCard[];
   calendar: LiveCalendarDay[];
@@ -539,6 +542,7 @@ export interface ParsedLive {
 export function emptyParsedLive(ai: Partial<LiveAiParse> = {}): ParsedLive {
   return {
     gmp: { rows: [], quoted: 0, tracked: 0 },
+    gmpAlt: { rows: [] },
     subscription: { rows: [] },
     cards: [],
     calendar: [],
@@ -550,11 +554,224 @@ export function emptyParsedLive(ai: Partial<LiveAiParse> = {}): ParsedLive {
 export function parseLivePages(pages: LivePages): ParsedLive {
   return {
     gmp: pages.gmp ? parseGmpPage(pages.gmp) : { rows: [], quoted: 0, tracked: 0 },
+    gmpAlt: pages.gmpAlt ? parseAltGmp(pages.gmpAlt) : { rows: [] },
     subscription: pages.subscription ? parseSubscriptionPage(pages.subscription) : { rows: [] },
     cards: [pages.current, pages.upcoming]
       .filter((html): html is string => Boolean(html))
       .flatMap((html) => parseIpoCards(html)),
     calendar: pages.calendar ? parseEventCalendar(pages.calendar) : [],
     ai: { rows: [] },
+  };
+}
+
+/* ------------------------------------------------------------------ second GMP source */
+
+/**
+ * The second GMP source: ipomarket.in/gmp/.
+ *
+ * IPO Ji publishes one grey-market quote per evening (its GMP page said "As of 5:30 PM" at
+ * 8:46 PM), which reads as stale on a phone even though the app fetched it a second earlier.
+ * ipomarket.in refreshes every 30 minutes and stamps every row with a machine-readable
+ * `<time dateTime="...Z">`, so this parser is what lets the board carry the newest quote
+ * published by anyone, with the source named next to it.
+ *
+ * The table it reads (server-rendered, no JavaScript needed):
+ *
+ *   | Company | Open Date | Price Band | GMP (₹) | GMP % | Est. Listing | Trend | Status |
+ *     Close Date | Updated <time dateTime="2026-09-14T15:15:00.298Z"> | Score | Apply |
+ *
+ * Only the fields the merge actually trusts are returned: the quote, its stamp, the band
+ * (used when nothing else carries one) and the dates as reported. No react-native imports -
+ * this runs in plain node for the tests and the live-report script.
+ */
+
+
+export interface LiveAltGmpRow {
+  name: string;
+  /** the site's own slug, when the row links to an issue page */
+  slug?: string;
+  gmp?: number;
+  gmpPercent?: number;
+  bandLow?: number;
+  bandHigh?: number;
+  /** the row's own stamp, ISO - the whole reason this source exists */
+  updatedAt?: string;
+  status?: string;
+  /** the bidding window as the source reports it; never used to overwrite published dates */
+  openDate?: string;
+  closeDate?: string;
+  /** page-level stamp, used for rows whose cell was empty */
+  pageUpdatedAt?: string;
+}
+
+export interface LiveAltGmpParse {
+  rows: LiveAltGmpRow[];
+  /** newest stamp on the page */
+  asOf?: string;
+}
+
+const MONTH_INDEX: Record<string, number> = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  sept: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11,
+};
+
+function number(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const match = /[-+]?\d+(?:\.\d+)?/.exec(raw.replace(/[₹,\s]/g, ''));
+  if (!match) return undefined;
+  const value = Number(match[0]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * "₹40 – ₹43" -> [40, 43]. A dash-less band means one number, which is still a band.
+ */
+function parseBand(raw: string | undefined): { low?: number; high?: number } {
+  if (!raw) return {};
+  const parts = raw.split(/[–—-]/).map((part) => number(part));
+  const clean = parts.filter((value): value is number => value !== undefined);
+  if (clean.length === 0) return {};
+  if (clean.length === 1) return { low: clean[0], high: clean[0] };
+  return { low: clean[0], high: clean[clean.length - 1] };
+}
+
+/**
+ * "11 Sept" (no year) and "16 Sep 2026" both appear on the page. The year-less form is the
+ * current year, unless that would put the date more than a month in the future - which is how
+ * a December page read in January still makes sense.
+ */
+export function altDateToIso(raw: string | undefined, now: Date): string | undefined {
+  if (!raw) return undefined;
+  const match = /(\d{1,2})\s*([A-Za-z]{3,4})\.?\s*(?:(\d{4}))?/.exec(raw.replace(/\s+/g, ' ').trim());
+  if (!match) return undefined;
+  const day = Number(match[1]);
+  const month = MONTH_INDEX[match[2].toLowerCase()];
+  if (month === undefined || day < 1 || day > 31) return undefined;
+  let year = match[3] ? Number(match[3]) : now.getUTCFullYear();
+  if (!match[3]) {
+    const guess = Date.UTC(year, month, day);
+    // a date more than 31 days ahead is last year's, e.g. "31 Dec" read on 2 Jan
+    if (guess - now.getTime() > 31 * 24 * 60 * 60 * 1000) year -= 1;
+  }
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
+ * "14 Sept, 20:45" -> an IST instant. The page also ships `<time dateTime>` with a real
+ * UTC instant, which is preferred; this is the fallback for the day it does not.
+ */
+export function altStampToIso(raw: string | undefined, now: Date): string | undefined {
+  if (!raw) return undefined;
+  const date = altDateToIso(raw, now);
+  const clock = /(\d{1,2}):(\d{2})/.exec(raw);
+  if (!date || !clock) return undefined;
+  const hour = Number(clock[1]);
+  const minute = Number(clock[2]);
+  if (hour > 23 || minute > 59) return undefined;
+  // 20:45 IST is 15:15Z
+  const utc = new Date(`${date}T00:00:00.000Z`);
+  utc.setUTCMinutes(utc.getUTCMinutes() + hour * 60 + minute - 330);
+  return utc.toISOString();
+}
+
+/** The page's own stamp, the one the reader compares against the clock. */
+export function pageStamp(html: string, now = new Date()): string | undefined {
+  const times = [...html.matchAll(/<time\b[^>]*\bdateTime\s*=\s*"([^"]+)"/gi)].map((m) => m[1]);
+  const parsed = times
+    .map((value) => ({ value, ms: new Date(value).getTime() }))
+    .filter((entry) => Number.isFinite(entry.ms))
+    .sort((a, b) => b.ms - a.ms);
+  if (parsed.length > 0) return parsed[0].value;
+  const text = textOf(html.slice(0, 20000));
+  const written = /(?:last updated|updated)\D{0,20}(\d{1,2}\s+\w{3,4},?\s*\d{1,2}:\d{2})/i.exec(text);
+  return written ? altStampToIso(written[1], now) : undefined;
+}
+
+/**
+ * Reads every row of the GMP tables. The site repeats its tables (open / upcoming / closed
+ * segments), so rows are de-duplicated by name and the newest stamp wins.
+ */
+export function parseAltGmp(html: string, now = new Date()): LiveAltGmpParse {
+  const fallbackStamp = pageStamp(html, now);
+  const rows = new Map<string, LiveAltGmpRow>();
+
+  for (const table of html.matchAll(/<table[\s\S]*?<\/table>/gi)) {
+    const markup = table[0];
+    const header = /<thead[\s\S]*?<\/thead>/i.exec(markup)?.[0] ?? '';
+    const columns = [...header.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/gi)].map((m) => textOf(m[1]).toLowerCase());
+    if (columns.length === 0) continue;
+    const at = (label: string): number => columns.findIndex((column) => column.startsWith(label));
+    const index = {
+      name: at('company'),
+      open: at('open date'),
+      band: at('price band'),
+      gmp: at('gmp (') >= 0 ? at('gmp (') : at('gmp'),
+      percent: at('gmp %'),
+      status: at('status'),
+      close: at('close date'),
+      updated: at('updated'),
+    };
+    if (index.name < 0 || index.gmp < 0) continue;
+
+    const body = /<tbody[\s\S]*?<\/tbody>/i.exec(markup)?.[0] ?? markup;
+    for (const tr of body.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)) {
+      const cells = [...tr[0].matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => m[1]);
+      if (cells.length <= index.name) continue;
+      // the name cell's own link carries the site's slug for the issue
+      const slug = /href\s*=\s*"\/ipo\/([^"?#]+)"/i.exec(cells[index.name])?.[1];
+      const name = textOf(cells[index.name]);
+      if (!name) continue;
+
+      const stampAttr = index.updated >= 0 ? cells[index.updated] : undefined;
+      const machine = stampAttr ? /\bdateTime\s*=\s*"([^"]+)"/i.exec(stampAttr)?.[1] : undefined;
+      const written = stampAttr ? /(\d{1,2}\s+\w{3,4},?\s*\d{1,2}:\d{2})/.exec(textOf(stampAttr))?.[1] : undefined;
+      const updatedAt = machine && Number.isFinite(new Date(machine).getTime()) ? machine : altStampToIso(written, now);
+
+      const band = parseBand(index.band >= 0 ? textOf(cells[index.band]) : undefined);
+      const row: LiveAltGmpRow = {
+        name,
+        slug,
+        gmp: index.gmp >= 0 ? number(textOf(cells[index.gmp]).replace(/[—–-]+/g, '')) : undefined,
+        gmpPercent: index.percent >= 0 ? number(textOf(cells[index.percent])) : undefined,
+        bandLow: band.low,
+        bandHigh: band.high,
+        updatedAt: updatedAt ?? fallbackStamp,
+        pageUpdatedAt: fallbackStamp,
+        status: index.status >= 0 ? textOf(cells[index.status]) : undefined,
+        openDate: index.open >= 0 ? altDateToIso(textOf(cells[index.open]), now) : undefined,
+        closeDate: index.close >= 0 ? altDateToIso(textOf(cells[index.close]), now) : undefined,
+      };
+
+      const key = name.toLowerCase();
+      const existing = rows.get(key);
+      if (!existing) rows.set(key, row);
+      else {
+        const a = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+        const b = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+        if (b >= a) rows.set(key, row);
+      }
+    }
+  }
+
+  const list = [...rows.values()];
+  const stamps = list
+    .map((row) => row.updatedAt)
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(value).getTime())
+    .filter((value) => Number.isFinite(value));
+  return {
+    rows: list,
+    asOf: stamps.length > 0 ? new Date(Math.max(...stamps)).toISOString() : fallbackStamp,
   };
 }

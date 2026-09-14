@@ -223,8 +223,83 @@ export const CALENDAR_JSON = `eventListData = [{"date":"2026-09-14","events":[{"
 
 export const CALENDAR_HTML = `<html><body><script>const other = 1;\n        ${CALENDAR_JSON}\n        window.eventListData = eventListData;</script></body></html>`;
 
+/**
+ * The second GMP source, mirroring ipomarket.in/gmp/ as it really renders (probed from CI):
+ * a server-rendered table whose every row carries `<time dateTime="...Z">`. Three rows, each
+ * proving one merge rule:
+ *  - Kanohar Electricals: 8:45 PM, newer than the IPO Ji fixture, so it must win;
+ *  - Veegaland Developers: 7:30 AM, older, so it must lose to the 5:30 PM board quote;
+ *  - Kwick Forensic: a name the bundled snapshot does not carry, so it must be ignored.
+ */
+export const ALT_GMP_HTML = `
+<p class="...">Updated every 30 minutes from grey market sources. Last updated <time dateTime="2026-09-14T15:15:00.298Z" class="font-medium text-primary">7 minutes ago</time>.</p>
+<table class="min-w-full divide-y divide-border text-sm">
+  <thead class="sticky top-0 z-10 bg-surface-2">
+    <tr>
+      <th scope="col" class="px-3 py-3 text-left text-[11px]"><button type="button" aria-label="Sort by Company">Company<!-- --> <span>↕</span></button></th>
+      <th scope="col" class="hidden px-3 py-3 text-left"><button type="button" aria-label="Sort by Open Date">Open Date<!-- --> <span>↕</span></button></th>
+      <th scope="col" class="px-3 py-3 text-right">Price Band</th>
+      <th scope="col" class="px-3 py-3 text-right"><button type="button" aria-label="Sort by GMP (₹)">GMP (₹)<!-- --> <span>↕</span></button></th>
+      <th scope="col" class="px-3 py-3 text-right"><button type="button" aria-label="Sort by GMP %">GMP %<!-- --> <span>▼</span></button></th>
+      <th scope="col" class="px-3 py-3 text-right"><button type="button" aria-label="Sort by Est. Listing">Est. Listing<!-- --> <span>↕</span></button></th>
+      <th scope="col" class="hidden px-3 py-3 text-center">Trend</th>
+      <th scope="col" class="px-3 py-3 text-left">Status</th>
+      <th scope="col" class="px-3 py-3 text-left"><button type="button" aria-label="Sort by Close Date">Close Date<!-- --> <span>↕</span></button></th>
+      <th scope="col" class="hidden whitespace-nowrap px-3 py-3 text-right">Updated</th>
+      <th scope="col" class="min-w-[110px] px-3 py-3 text-left">Score</th>
+      <th scope="col" class="px-3 py-3 text-center">Apply</th>
+    </tr>
+  </thead>
+  <tbody class="divide-y divide-border">
+    <tr class="transition-colors hover:bg-surface-2">
+      <td class="px-3 py-3"><a class="font-medium text-primary" href="/ipo/kanohar-electricals">Kanohar Electricals</a></td>
+      <td class="hidden px-3 py-3 sm:table-cell tabular-nums text-gain font-medium">10 Sept</td>
+      <td class="px-3 py-3 text-right tabular-nums">₹585 – ₹620</td>
+      <td class="px-3 py-3 text-right text-base font-bold tabular-nums text-gain">₹240</td>
+      <td class="px-3 py-3 text-right"><span class="inline-flex text-xs tabular-nums">+39.34%</span></td>
+      <td class="px-3 py-3 text-right tabular-nums text-gain font-semibold">₹860</td>
+      <td class="hidden px-3 py-3 text-center md:table-cell"><svg width="60" height="20" aria-hidden="true"><path d="M 0.00,0.00 L 60.00,20.00" fill="none" stroke="#16a34a"></path></svg></td>
+      <td class="px-3 py-3"><span class="inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">OPEN</span></td>
+      <td class="px-3 py-3 text-secondary">16 Sep 2026</td>
+      <td class="hidden whitespace-nowrap px-3 py-3 text-right text-[11px] tabular-nums"><time dateTime="2026-09-14T15:15:00.298Z">14 Sept, 20:45</time></td>
+      <td class="min-w-[110px] px-3 py-3"><span class="inline-flex items-center gap-1 rounded-full font-semibold"><span style="font-size:13px;font-weight:800">6.9</span><span style="font-weight:600">· Moderate</span></span></td>
+      <td class="px-3 py-3 text-center"><a href="/api/affiliate/zerodha?ipo=kanohar-electricals" class="rounded-md px-3 py-1 text-xs font-semibold">Apply</a></td>
+    </tr>
+    <tr class="transition-colors hover:bg-surface-2">
+      <td class="px-3 py-3"><a class="font-medium text-primary" href="/ipo/veegaland-developers">Veegaland Developers</a></td>
+      <td class="hidden px-3 py-3 sm:table-cell tabular-nums text-gain font-medium">10 Sept</td>
+      <td class="px-3 py-3 text-right tabular-nums">₹130 – ₹140</td>
+      <td class="px-3 py-3 text-right text-base font-bold tabular-nums text-gain">₹21</td>
+      <td class="px-3 py-3 text-right"><span class="inline-flex text-xs tabular-nums">+15.00%</span></td>
+      <td class="px-3 py-3 text-right tabular-nums text-gain font-semibold">₹161</td>
+      <td class="hidden px-3 py-3 text-center md:table-cell"><svg width="60" height="20" aria-hidden="true"><path d="M 0.00,0.00 L 60.00,20.00" fill="none" stroke="#16a34a"></path></svg></td>
+      <td class="px-3 py-3"><span class="inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">OPEN</span></td>
+      <td class="px-3 py-3 text-secondary">15 Sep 2026</td>
+      <td class="hidden whitespace-nowrap px-3 py-3 text-right text-[11px] tabular-nums"><time dateTime="2026-09-14T02:00:00.000Z">14 Sept, 7:30</time></td>
+      <td class="min-w-[110px] px-3 py-3"><span class="inline-flex items-center gap-1 rounded-full font-semibold"><span style="font-size:13px;font-weight:800">5.3</span><span style="font-weight:600">· Weak</span></span></td>
+      <td class="px-3 py-3 text-center"><a href="/api/affiliate/zerodha?ipo=veegaland-developers" class="rounded-md px-3 py-1 text-xs font-semibold">Apply</a></td>
+    </tr>
+    <tr class="transition-colors hover:bg-surface-2">
+      <td class="px-3 py-3"><a class="font-medium text-primary" href="/ipo/kwick-forensic">Kwick Forensic</a></td>
+      <td class="hidden px-3 py-3 sm:table-cell tabular-nums text-gain font-medium">12 Sept</td>
+      <td class="px-3 py-3 text-right tabular-nums">₹90 – ₹95</td>
+      <td class="px-3 py-3 text-right text-base font-bold tabular-nums text-gain">₹14</td>
+      <td class="px-3 py-3 text-right"><span class="inline-flex text-xs tabular-nums">+14.74%</span></td>
+      <td class="px-3 py-3 text-right tabular-nums text-gain font-semibold">₹109</td>
+      <td class="hidden px-3 py-3 text-center md:table-cell"><svg width="60" height="20" aria-hidden="true"><path d="M 0.00,0.00 L 60.00,20.00" fill="none" stroke="#16a34a"></path></svg></td>
+      <td class="px-3 py-3"><span class="inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">OPEN</span></td>
+      <td class="px-3 py-3 text-secondary">17 Sep 2026</td>
+      <td class="hidden whitespace-nowrap px-3 py-3 text-right text-[11px] tabular-nums"><time dateTime="2026-09-14T15:15:00.298Z">14 Sept, 20:45</time></td>
+      <td class="min-w-[110px] px-3 py-3"><span class="inline-flex items-center gap-1 rounded-full font-semibold"><span style="font-size:13px;font-weight:800">6.1</span><span style="font-weight:600">· Moderate</span></span></td>
+      <td class="px-3 py-3 text-center"><a href="/api/affiliate/zerodha?ipo=kwick-forensic" class="rounded-md px-3 py-1 text-xs font-semibold">Apply</a></td>
+    </tr>
+  </tbody>
+</table>
+`;
+
 export const livePageFixtures = {
   gmp: GMP_HTML,
+  gmpAlt: ALT_GMP_HTML,
   subscription: SUBSCRIPTION_HTML,
   current: CARDS_HTML,
   calendar: CALENDAR_HTML,

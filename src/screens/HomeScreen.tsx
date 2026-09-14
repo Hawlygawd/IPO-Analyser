@@ -8,7 +8,7 @@ import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
 import { DATA_AS_OF_LABEL, DATA_SOURCE_LABEL } from '../lib/ipoData';
 import { IPO } from '../lib/types';
-import { daysUntil, formatIstTime } from '../lib/format';
+import { daysUntil, formatIstTime, quoteAge } from '../lib/format';
 import { dataAge } from '../lib/analysis';
 import { BoardTab, SortKey, bucketBoard, boardStats, sortIpos } from '../lib/board';
 import { IPOCard } from '../components/IPOCard';
@@ -55,9 +55,14 @@ export function HomeScreen({ theme }: { theme: Theme }) {
           <Ionicons name="pulse-outline" size={17} color={theme.up} />
           <Text style={{ flex: 1, fontSize: 11.5, color: theme.textSub, lineHeight: 16 }}>
             <Text style={{ fontWeight: '800', color: theme.text }}>Live from {DATA_SOURCE_LABEL}. </Text>
-            Newest upstream stamp {boardAsOfLabel}
+            Checked {formatIstTime(live.fetchedAt)} IST • newest quote published by a source{' '}
+            {boardAsOfLabel}
+            {quoteAge(live.asOf, live.fetchedAt) ? ` (${quoteAge(live.asOf, live.fetchedAt)} old)` : ''}
             {live.updated > 0 ? ` • ${live.updated} figure${live.updated === 1 ? '' : 's'} updated` : ''}
-            {live.added > 0 ? ` • ${live.added} new issue${live.added === 1 ? '' : 's'}` : ''}. Pull down to refresh.
+            {live.added > 0 ? ` • ${live.added} new issue${live.added === 1 ? '' : 's'}` : ''}.{' '}
+            {quoteAge(live.asOf, live.fetchedAt)
+              ? 'The boards have not posted anything newer yet - pull down to check again.'
+              : 'Pull down to refresh.'}
           </Text>
           <Pressable onPress={refresh} accessibilityRole="button" accessibilityLabel="Refresh from the live boards">
             <Text style={{ fontSize: 11.5, fontWeight: '800', color: theme.primary }}>Refresh</Text>

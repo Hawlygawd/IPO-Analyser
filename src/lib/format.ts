@@ -118,6 +118,25 @@ export function timeAgo(at: number): string {
 }
 
 /** Countdown label such as "closes in 1 day" / "closed". */
+/**
+ * How far a source's own stamp sits behind the moment we asked for it, in words.
+ *
+ * This is the difference a reader cares about when a board says "5:54 PM" at 8:46 PM: not
+ * "when did the app fetch" but "how old is the number the source is publishing".
+ */
+export function quoteAge(asOf: string | null | undefined, at: number | null | undefined): string | null {
+  if (!asOf || !at) return null;
+  const stamp = new Date(asOf).getTime();
+  if (!Number.isFinite(stamp)) return null;
+  const minutes = Math.round((at - stamp) / 60000);
+  if (minutes < 3) return null;
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours < 24) return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
 export function countdownLabel(iso: string): string {
   const d = daysUntil(iso);
   if (d === 0) return 'today';

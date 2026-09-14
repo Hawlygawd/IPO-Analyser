@@ -88,7 +88,7 @@ the icon, package name (`com.ipopulse.app`), version and permissions all stay de
 Two layers, in this order:
 
 1. **A live pull.** On launch, on returning to the foreground after 10 minutes, and whenever you
-   pull to refresh, `src/lib/live` downloads four public pages with a mobile user agent and parses
+   pull to refresh, `src/lib/live` downloads five public pages with a mobile user agent and parses
    the server-rendered markup:
 
    | Page | What is read |
@@ -97,9 +97,14 @@ Two layers, in this order:
    | `/ipo-subscription-status-live-bidding-data-bse-nse` | `table.subs-overview-table` rows: QIB / NII / retail / total multiples, applications and the exchange snapshot time |
    | `/ipo/current-ipo`, `/ipo/upcoming-ipo` | `article.ipo-card` blocks: price band, expected premium and the bidding window |
    | `/ipo-event-calendar` | the inline `eventListData = [...]` JSON that drives the calendar: per-day events with status `OPEN` / `CLOSING` / `ALLOTMENT` / `LISTING` / `HOLIDAY` |
+   | `ipomarket.in/gmp/` | a second, independent GMP board that refreshes every 30 minutes and stamps every row with a UTC instant. It is read because IPO Ji publishes one quote in the evening - at 9 PM its page still says 5:30 PM - and a phone should be able to show the newest quote anyone has published |
 
    Live rows are matched to the snapshot by upstream slug, then by normalised name, and only the
-   fields that page actually published are overwritten. Issues that exist only live (a new SME
+   fields that page actually published are overwritten. When both GMP boards carry a quote for the
+   same issue, the newer stamp wins for that figure and the publisher travels with it (the detail
+   screen reads `GMP quote recorded 14 Sep 2026, 8:45 PM IST · IPO Market`). Where a source is
+   older it is ignored - it never overwrites a fresher number, and a name the board does not carry
+   is dropped rather than guessed at. Issues that exist only live (a new SME
    opening, say) are appended - with derived milestone dates still marked tentative - and an issue
    whose dates upstream has not announced yet is left out rather than given a placeholder date
    (those cards print "TBA" over a `2050-01-01` sentinel upstream, which the parser drops).
@@ -165,8 +170,10 @@ search or a search request is retried without it rather than failing.
 
 Honesty is enforced rather than promised:
 
-- The last pull is shown with the **newest upstream stamp** (quote time, not just "now"), so a
-  5:30 PM quote and a 12:00 PM quote are never conflated.
+- The last pull is shown with two clocks: **when the app checked** the boards, and the **newest
+  quote any source has published** (with its age, e.g. "Live • 8:45 PM · 3h old"). A 5:30 PM quote
+  and a 12:00 PM quote are never conflated with the moment the app fetched them, and when nothing
+  newer has been published the app says so instead of implying the numbers are live.
 - A failed pull never blocks the UI: the previous pull is restored from storage on the next launch,
   and once the bundled snapshot is a few days old a banner says so.
 - Settings lists each source with its row count and stamp, so it is obvious which board is stale -
@@ -197,7 +204,7 @@ Quality gates:
 ```bash
 npm run check:deps   # native dependencies must match the versions Expo SDK 57 ships
 npm run typecheck    # strict TS, app config + node config for scripts/tests
-npm test             # 90 unit tests (tsx --test): data integrity, formatting, analysis, board,
+npm test             # 92 unit tests (tsx --test): data integrity, formatting, analysis, board,
                      # reminders, live parsing + merge, and the AI key layer against fake providers
 npm run board        # prints the board as the app sees it (npm run board -- gmp for the ranking)
 npm run build:web    # static web export into dist/

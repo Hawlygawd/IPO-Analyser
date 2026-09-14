@@ -190,6 +190,7 @@ async function main() {
   if (LIVE_FIXTURES) {
     const fixtureFor = (url: string): string => {
       const target = decodeURIComponent(url);
+      if (target.includes('ipomarket.in')) return livePageFixtures.gmpAlt;
       if (target.includes('/ipo-gmp')) return livePageFixtures.gmp;
       if (target.includes('subscription-status')) return livePageFixtures.subscription;
       if (target.includes('current-ipo') || target.includes('upcoming-ipo')) return livePageFixtures.current;
@@ -339,8 +340,9 @@ async function main() {
     assert.match(root, /Live from IPO Ji/, 'live mode: the live callout did not render');
     assert.match(root, /\+₹22/, 'live mode: the refreshed premium did not reach the board');
     assert.match(root, /2\.41x/, 'live mode: the refreshed subscription did not reach the card');
-    // the newest upstream stamp replaces the bundled snapshot stamp everywhere it is shown
-    assert.match(root, /live 14 Sep 2026, 5:30 PM IST/, 'live mode: the upstream stamp is missing');
+    // the newest quote published by anyone is what the board shows: the 30-minute source
+    // stamped Kanohar at 8:45 PM, three hours after IPO Ji's 5:30 PM evening quote
+    assert.match(root, /live 14 Sep 2026, 8:45 PM IST/, 'live mode: the freshest stamp is missing');
     assert.ok(!/2:15 PM IST/.test(root), 'live mode: the stale snapshot stamp is still on screen');
   }
   assert.match(root, /Bidding now/, 'summary tiles did not render');
@@ -457,6 +459,11 @@ async function main() {
   const searchRows = gmpRows();
   assert.equal(searchRows.length, 1, `search returned ${searchRows.length} rows`);
   assert.match(searchRows[0], /Kanohar Electricals/, 'the matching row disappeared');
+  if (LIVE_FIXTURES) {
+    // this issue's quote came from the 30-minute source (₹240 at 8:45 PM), not from the
+    // bundled snapshot (₹238) or the board's evening quote
+    assert.match(searchRows[0], /premium ₹240/, 'live mode: the newer 30-minute quote did not reach the board');
+  }
 
   // the row is two sibling controls now (body + star), so both must still work
   pressMatching('Add Kanohar Electricals to watchlist');
@@ -474,6 +481,10 @@ async function main() {
   pressMatching('Kanohar Electricals.');
   await settle(600);
   assert.match(textOf('#root'), /Issue facts/, 'tapping the GMP row body did not open the detail screen');
+  if (LIVE_FIXTURES) {
+    // the screen must say which publisher the quote came from, not just when it was recorded
+    assert.match(textOf('#root'), /IPO Market/, 'live mode: the detail screen does not name the quote source');
+  }
   press('Go back');
   await settle(500);
 
@@ -489,6 +500,10 @@ async function main() {
   press('Settings');
   await settle(500);
   const settings = textOf('#root');
+  if (LIVE_FIXTURES) {
+    assert.match(settings, /IPO Market GMP \(30-min refresh\)/, 'live mode: the second GMP source is missing from the source list');
+    assert.match(settings, /IPO Market GMP \(30-min refresh\)[\s\S]{0,80}3 rows/, 'live mode: the second source did not report its rows');
+  }
   assert.match(settings, /Appearance/, 'settings: appearance card missing');
   assert.match(settings, /Reminders/, 'settings: reminders card missing');
   assert.match(settings, /Privacy & data/, 'settings: privacy card missing');

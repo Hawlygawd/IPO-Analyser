@@ -443,7 +443,12 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
               />
             ) : null}
             {ipo.gmpUpdated ? (
-              <KeyValueRow theme={theme} label="GMP quote recorded" value={`${formatIstTime(ipo.gmpUpdated)} IST`} />
+              <KeyValueRow
+                theme={theme}
+                label="GMP quote recorded"
+                value={`${formatIstTime(ipo.gmpUpdated)} IST${ipo.gmpSource ? ` • ${ipo.gmpSource}` : ''}`}
+                multiline
+              />
             ) : null}
             <Button
               theme={theme}

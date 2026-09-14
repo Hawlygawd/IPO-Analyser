@@ -3,7 +3,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { radius, Theme, ThemeMode } from '../theme';
 import { useStore } from '../lib/store';
 import { DATA_AS_OF_LABEL, DATA_SOURCE_LABEL } from '../lib/ipoData';
-import { formatIstTime, timeAgo } from '../lib/format';
+import { formatIstTime, quoteAge, timeAgo } from '../lib/format';
 import { dataAge } from '../lib/analysis';
 import Constants from 'expo-constants';
 import { Button, KeyValueRow, SectionCard } from '../components/ui';
@@ -188,7 +188,9 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
           title="Data"
           subtitle={
             live.fetchedAt
-              ? `Live from IPO Ji - newest upstream stamp ${boardAsOfLabel}`
+              ? `Checked the boards ${timeAgo(live.fetchedAt)} - newest quote published ${boardAsOfLabel}${
+                  quoteAge(live.asOf, live.fetchedAt) ? ` (${quoteAge(live.asOf, live.fetchedAt)} old)` : ''
+                }`
               : age.stale
                 ? `Snapshot is ${age.label} - figures may have moved`
                 : `Snapshot ${age.label}`
@@ -198,14 +200,26 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
           <KeyValueRow theme={theme} label="Data on screen" value={live.fetchedAt ? 'Live pull' : 'Bundled snapshot'} />
           <KeyValueRow
             theme={theme}
-            label={live.fetchedAt ? 'Newest upstream stamp' : 'Board snapshot'}
+            label={live.fetchedAt ? 'Newest quote published' : 'Board snapshot'}
             value={live.fetchedAt ? boardAsOfLabel : DATA_AS_OF_LABEL}
           />
           <KeyValueRow
             theme={theme}
-            label="Last live fetch"
+            label="Checked in app"
             value={live.fetchedAt ? `${timeAgo(live.fetchedAt)} (${formatIstTime(live.fetchedAt)})` : 'not yet - tap Re-check the board'}
           />
+          {live.fetchedAt ? (
+            <KeyValueRow
+              theme={theme}
+              label="Quote age"
+              value={
+                quoteAge(live.asOf, live.fetchedAt)
+                  ? `${quoteAge(live.asOf, live.fetchedAt)} behind this refresh - the sources have not published anything newer`
+                  : 'current as of this refresh'
+              }
+              multiline
+            />
+          ) : null}
           <KeyValueRow theme={theme} label="Snapshot source" value={DATA_SOURCE_LABEL} multiline />
           <KeyValueRow theme={theme} label="Issues on the board" value={String(ipos.length)} />
           <KeyValueRow theme={theme} label="Last checked in app" value={`${timeAgo(lastChecked)} (${formatIstTime(lastChecked)})`} />

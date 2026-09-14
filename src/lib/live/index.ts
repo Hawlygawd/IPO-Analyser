@@ -24,6 +24,7 @@ export * from './sources';
 export function hasLiveData(parsed: ParsedLive): boolean {
   return (
     parsed.gmp.rows.length > 0 ||
+    parsed.gmpAlt.rows.length > 0 ||
     parsed.subscription.rows.length > 0 ||
     parsed.cards.length > 0 ||
     parsed.calendar.length > 0 ||
@@ -37,7 +38,7 @@ export function hasLiveData(parsed: ParsedLive): boolean {
  * so it must not show a four-source pull as "nothing happened".
  */
 export function failedSourceStatuses(error: string): LiveSourceStatus[] {
-  return (['gmp', 'subscription', 'cards', 'calendar'] as LiveSourceKey[]).map((key) => ({
+  return (['gmp', 'gmpAlt', 'subscription', 'cards', 'calendar'] as LiveSourceKey[]).map((key) => ({
     key,
     label: SOURCE_LABELS[key],
     ok: false,
@@ -62,6 +63,7 @@ export function sourceStatuses(
 
   return [
     status('gmp', parsed.gmp.rows.length, parsed.gmp.asOf, errors.gmp),
+    status('gmpAlt', parsed.gmpAlt.rows.length, parsed.gmpAlt.asOf, errors.gmpAlt),
     status('subscription', parsed.subscription.rows.length, parsed.subscription.asOf, errors.subscription),
     status(
       'cards',

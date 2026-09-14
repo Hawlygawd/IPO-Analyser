@@ -25,7 +25,9 @@ import {
 import { istLabel, mergeBoard } from '../live/merge';
 import { hasLiveData, pullLiveBoard, sourceStatuses } from '../live';
 import { IPOT } from '../ipoData';
+import { altDateToIso, altStampToIso, parseAltGmp } from '../live/parse';
 import {
+  ALT_GMP_HTML,
   CALENDAR_HTML,
   CALENDAR_JSON,
   CARDS_HTML,
@@ -237,15 +239,33 @@ test('a live pull overwrites only the fields upstream actually published', () =>
   assert.equal(manipal.subscription?.total, 1.54);
   assert.equal(manipal.subscription?.nii, 1.31);
 
-  // an issue with no live row is left exactly as the snapshot had it
+  // the second GMP source is newer than the board's evening quote, so it wins - and it says
+  // so: the value, the stamp and the publisher all change together
   const kanohar = board.ipos.find((ipo) => ipo.id === 'kanohar-electricals')!;
-  const snapshotKanohar = IPOT.find((ipo) => ipo.id === 'kanohar-electricals')!;
-  assert.deepEqual(kanohar, snapshotKanohar);
+  assert.equal(kanohar.gmp, 240);
+  assert.equal(kanohar.gmpUpdated, '2026-09-14T15:15:00.298Z');
+  assert.equal(kanohar.gmpSource, 'IPO Market');
 
-  assert.equal(board.asOf, '2026-09-14T12:00:00.000Z');
+  // ... and where it is *older* it must not touch the board's quote
+  assert.equal(veegaland.gmp, 22);
+  assert.equal(veegaland.gmpUpdated, '2026-09-14T12:00:00.000Z');
+  assert.equal(veegaland.gmpSource, 'IPO Ji');
+
+  // a name the bundled board does not carry is ignored, not guessed at
+  assert.equal(board.ipos.some((ipo) => /kwick/i.test(ipo.name)), false);
+
+  // an issue with no live row at all is left exactly as the snapshot had it
+  const untouched = board.ipos.find((ipo) => ipo.id === 'quanto-agroworld')!;
+  const snapshotUntouched = IPOT.find((ipo) => ipo.id === 'quanto-agroworld')!;
+  assert.deepEqual(untouched, snapshotUntouched);
+
+  // the board's stamp is the newest quote anyone published, not the moment we fetched
+  assert.equal(board.asOf, '2026-09-14T15:15:00.298Z');
   assert.equal(board.fetchedAt, Date.parse('2026-09-14T12:31:00Z'));
-  assert.ok(board.updated >= 2);
-  assert.equal(istLabel(board.asOf), '14 Sep 2026, 5:30 PM IST');
+  assert.equal(istLabel(board.asOf), '14 Sep 2026, 8:45 PM IST');
+  // exactly the issues whose figures moved: Veegaland (quote, band dates, subscription),
+  // Manipal (subscription split) and Kanohar (the newer quote from the second source)
+  assert.equal(board.updated, 3);
 });
 
 test('live-only issues are appended, with derived milestone dates marked tentative', () => {
@@ -316,8 +336,10 @@ test('pullLiveBoard wires download, parse and merge together', async () => {
   }) as unknown as typeof fetch;
 
   const { board } = await pullLiveBoard(IPOT, { fetcher });
-  assert.equal(calls.length, 5);
-  assert.ok(calls.every((url) => url.startsWith('https://www.ipoji.com/')));
+  // five IPO Ji pages plus the second GMP source
+  assert.equal(calls.length, 6);
+  assert.ok(calls.every((url) => url.startsWith('https://www.ipoji.com/') || url.startsWith('https://ipomarket.in/')));
+  assert.equal(calls.filter((url) => url.includes('ipomarket.in')).length, 1);
   assert.equal(board.ipos.find((ipo) => ipo.id === 'veegaland-developers')!.gmp, 22);
   assert.equal(board.sources.find((source) => source.key === 'gmp')!.ok, true);
 
@@ -337,4 +359,34 @@ test('web builds reach the pages through the same-origin proxy', async () => {
   await pullLiveBoard(IPOT, { fetcher, useProxy: true });
   assert.ok(seen.every((url) => url.startsWith('/api/ipoji?u=http')));
   assert.ok(seen[0].includes(encodeURIComponent('https://www.ipoji.com/ipo-gmp')));
+});
+
+/* --------------------------------------------------- second GMP source (ipomarket) */
+
+test('the 30-minute source parses each row, its stamp and its slug', () => {
+  const parsed = parseAltGmp(ALT_GMP_HTML, new Date('2026-09-14T15:20:00Z'));
+  assert.equal(parsed.rows.length, 3);
+  assert.equal(parsed.asOf, '2026-09-14T15:15:00.298Z');
+
+  const kanohar = parsed.rows.find((row) => row.name === 'Kanohar Electricals')!;
+  assert.equal(kanohar.slug, 'kanohar-electricals');
+  assert.equal(kanohar.gmp, 240);
+  assert.equal(kanohar.gmpPercent, 39.34);
+  assert.equal(kanohar.bandLow, 585);
+  assert.equal(kanohar.bandHigh, 620);
+  assert.equal(kanohar.updatedAt, '2026-09-14T15:15:00.298Z');
+  assert.equal(kanohar.status, 'OPEN');
+
+  // an older row keeps its own older stamp - the parser must not stamp everything "now"
+  const veegaland = parsed.rows.find((row) => row.name === 'Veegaland Developers')!;
+  assert.equal(veegaland.updatedAt, '2026-09-14T02:00:00.000Z');
+});
+
+test('year-less dates on that page resolve to the nearest sensible year', () => {
+  const now = new Date('2026-09-14T15:20:00Z');
+  assert.equal(altDateToIso('11 Sept', now), '2026-09-11');
+  assert.equal(altDateToIso('16 Sep 2026', now), '2026-09-16');
+  assert.equal(altDateToIso('nonsense', now), undefined);
+  assert.equal(altStampToIso('14 Sept, 20:45', now), '2026-09-14T15:15:00.000Z');
+  assert.equal(altStampToIso('14 Sept', now), undefined);
 });

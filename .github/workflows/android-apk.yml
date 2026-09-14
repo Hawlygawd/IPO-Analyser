@@ -188,6 +188,17 @@ jobs:
           Settings screen lists each source with its row count and stamp, and issues that only
           exist live (a new SME opening, for example) are added to the board automatically.
 
+          **New in 1.4.0 - a fresher quote, and a clock that tells the truth.** IPO Ji posts one
+          grey-market quote in the evening (its GMP page still said 5:30 PM at 9 PM), so the board now
+          also reads a second source that refreshes every 30 minutes and stamps every row. Whichever
+          publisher has the newer quote wins for that issue, and the figure carries its source: the
+          detail screen says "GMP quote recorded 14 Sep 2026, 8:45 PM IST • IPO Market" instead of
+          leaving you to guess where 5:30 PM came from. The header chip adds the age ("Live • 8:45 PM
+          · 3h old"), and the Home callout separates the two clocks - when the app checked the boards
+          ("Checked 9:02 PM IST") from what the sources have actually published. Settings has a Quote
+          age row that says the same thing in words. The count of figures a refresh changed was also
+          wrong (it counted the rows that stood still), so "12 figures updated" now means twelve.
+
           **New in 1.3.0 - your own AI key, for when the boards are unreachable.** Some networks
           and carriers cannot reach the boards at all. Settings now takes an API key from any of
           Gemini, OpenAI, xAI (Grok), NVIDIA, Groq, OpenRouter, Claude, Mistral, DeepSeek, Together,

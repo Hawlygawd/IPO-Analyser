@@ -1,22 +1,27 @@
 /**
  * Same-origin proxy for the web build of IPO Pulse.
  *
- * Browsers cannot read ipoji.com directly: the site sends no CORS headers, so a fetch from
- * the deployed web app is blocked before the response can be read. The native app has no
- * such restriction (it is a normal HTTPS client), so this route only exists for `web`.
+ * Browsers cannot read the upstream boards directly: neither site sends CORS headers, so a
+ * fetch from the deployed web app is blocked before the response can be read. The native app
+ * has no such restriction (it is a normal HTTPS client), so this route only exists for `web`.
  *
  * The app calls `/api/ipoji?u=<encoded upstream url>`; this function fetches it and returns
- * the HTML as text. Only the four board paths are allowed, so the route cannot be turned
- * into an open proxy.
+ * the HTML as text. Only the board paths of the two known hosts are allowed and the
+ * response headers are stripped, so the route cannot be turned into an open proxy.
  */
 
-const ALLOWED_PATHS = new Set([
-  '/ipo-gmp',
-  '/ipo-subscription-status-live-bidding-data-bse-nse',
-  '/ipo/current-ipo',
-  '/ipo/upcoming-ipo',
-  '/ipo-event-calendar',
-]);
+/** host (without www) -> the exact paths we read from it */
+const ALLOWED = {
+  'ipoji.com': [
+    '/ipo-gmp',
+    '/ipo-subscription-status-live-bidding-data-bse-nse',
+    '/ipo/current-ipo',
+    '/ipo/upcoming-ipo',
+    '/ipo-event-calendar',
+  ],
+  // the 30-minute GMP source, which carries a per-row stamp (/gmp/ and /gmp both answer)
+  'ipomarket.in': ['/gmp', '/gmp/'],
+};
 
 const UA =
   'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36';
@@ -32,8 +37,9 @@ module.exports = async (req, res) => {
   }
 
   const host = target.hostname.replace(/^www\./, '');
-  if (host !== 'ipoji.com' || !ALLOWED_PATHS.has(target.pathname)) {
-    res.status(403).json({ error: 'only the IPO Ji board pages may be proxied' });
+  const paths = ALLOWED[host];
+  if (!paths || !paths.includes(target.pathname)) {
+    res.status(403).json({ error: 'only the known board pages may be proxied' });
     return;
   }
 

@@ -40,6 +40,11 @@ async function main() {
       .join(', ')}`
   );
   lines.push(
+    `- Second GMP source (ipomarket.in): ${parsed.gmpAlt.rows.length} rows` +
+      `${parsed.gmpAlt.asOf ? `, newest stamp ${istLabel(parsed.gmpAlt.asOf)}` : ''}` +
+      `${parsed.gmpAlt.rows.length ? `, e.g. ${parsed.gmpAlt.rows.slice(0, 4).map((row) => `${row.name} +₹${row.gmp ?? '—'}`).join(', ')}` : ''}`
+  );
+  lines.push(
     `- Subscription report: ${parsed.subscription.rows.length} rows, e.g. ${parsed.subscription.rows
       .slice(0, 3)
       .map((row) => `${row.name} ${row.total}x`)
@@ -69,7 +74,8 @@ async function main() {
   for (const ipo of changed) {
     const bundled = IPOT.find((existing) => existing.id === ipo.id);
     lines.push(
-      `  - ${ipo.name}: GMP ${bundled?.gmp ?? '—'} → ${ipo.gmp ?? 'no quote'}, ` +
+      `  - ${ipo.name}: GMP ${bundled?.gmp ?? '—'} → ${ipo.gmp ?? 'no quote'}` +
+        `${ipo.gmpSource ? ` (${ipo.gmpSource}${ipo.gmpUpdated ? `, ${istLabel(ipo.gmpUpdated)}` : ''})` : ''}, ` +
         `subscription ${bundled?.subscription?.total ?? '—'}x → ${ipo.subscription?.total ?? '—'}x`
     );
   }

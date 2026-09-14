@@ -1,6 +1,7 @@
 import { Pressable, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { radius, Theme } from '../theme';
+import { quoteAge } from '../lib/format';
 import type { LiveInfo } from '../lib/store';
 
 /**
@@ -27,10 +28,18 @@ export function LiveChip({
   const isAi = live.state === 'ai' && live.fetchedAt !== null;
   const isLive = live.state === 'live' && live.fetchedAt !== null;
   const time = asOfLabel.split(', ').pop() ?? asOfLabel;
+  // the point of the chip at 9 PM: the source's own stamp, and how old it is
+  const lag = quoteAge(live.asOf, live.fetchedAt);
 
   const tone = loading ? theme.info : isAi ? theme.info : isLive ? theme.up : theme.warn;
   const soft = loading ? theme.infoSoft : isAi ? theme.infoSoft : isLive ? theme.upSoft : theme.warnSoft;
-  const label = loading ? 'Updating…' : isAi ? `AI • ${time}` : isLive ? `Live • ${time}` : 'Snapshot';
+  const label = loading
+    ? 'Updating…'
+    : isAi
+      ? `AI • ${time}`
+      : isLive
+        ? `Live • ${time}${lag ? ` · ${lag} old` : ''}`
+        : 'Snapshot';
   const icon = loading ? 'sync-outline' : isAi ? 'sparkles-outline' : isLive ? 'pulse-outline' : 'cloud-offline-outline';
   const aiWho = live.ai ? `${live.ai.providerLabel} • ${live.ai.model}` : 'your saved key';
   const detail = loading
