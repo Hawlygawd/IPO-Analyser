@@ -30,40 +30,46 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="$(node -p "require('./app.json').expo.version")"
-          gh release download "v${VERSION}" --pattern '*.apk' --clobber -O ipo-pulse.apk
-          ls -l ipo-pulse.apk
-          sha256sum ipo-pulse.apk > sha256.txt
+          # keep the release's own file name: the published checksum has to name the file a
+          # downloader ends up with, or "sha256sum -c" cannot find it
+          NAME="ipo-pulse-${VERSION}.apk"
+          gh release download "v${VERSION}" --pattern '*.apk' --clobber -O "$NAME"
+          ls -l "$NAME"
+          sha256sum "$NAME" > sha256.txt
           cat sha256.txt
 
       - name: Inspect the APK
         run: |
           AAPT2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)"
           APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)"
+          VERSION="$(node -p "require('./app.json').expo.version")"
+          APK="ipo-pulse-${VERSION}.apk"
 
           # release APKs are signed with the APK Signature Scheme (v2/v3), so there are no
           # META-INF/*.RSA files to look for - apksigner is the check that actually answers
-          # "will Android install this?"
-          SIGNATURE="$("$APKSIGNER" verify --verbose --print-certs ipo-pulse.apk 2>&1 | head -12)"
+          # "will Android install this?"; the file keeps the release's own name so the
+          # checksum published next to it can be verified with sha256sum -c
+          SIGNATURE="$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1 | head -12)"
           {
-            echo "size:    $(du -h ipo-pulse.apk | cut -f1)"
+            echo "size:    $(du -h "$APK" | cut -f1)"
             echo "sha256:  $(cut -d' ' -f1 sha256.txt)"
             echo
-            echo "abis:    $(unzip -l ipo-pulse.apk | grep -o 'lib/[^/]*/' | sort -u | tr '\n' ' ')"
-            echo "bundle:  $(unzip -l ipo-pulse.apk | grep -c 'assets/index.android.bundle') file(s)"
-            echo "dex:     $(unzip -l ipo-pulse.apk | grep -c 'classes.*\.dex') file(s)"
+            echo "abis:    $(unzip -l "$APK" | grep -o 'lib/[^/]*/' | sort -u | tr '\n' ' ')"
+            echo "bundle:  $(unzip -l "$APK" | grep -c 'assets/index.android.bundle') file(s)"
+            echo "dex:     $(unzip -l "$APK" | grep -c 'classes.*\.dex') file(s)"
             echo
             echo "signature:"
             echo "$SIGNATURE" | sed 's/^/  /'
             echo
             echo "manifest:"
-            "$AAPT2" dump badging ipo-pulse.apk 2>/dev/null | grep -E "^package|^sdkVersion|^targetSdkVersion|^launchable-activity|^application-label:" | sed 's/^/  /' || echo "  (aapt2 unavailable)"
+            "$AAPT2" dump badging "$APK" 2>/dev/null | grep -E "^package|^sdkVersion|^targetSdkVersion|^launchable-activity|^application-label:" | sed 's/^/  /' || echo "  (aapt2 unavailable)"
           } | tee apk-report.txt
 
           fail=0
-          unzip -l ipo-pulse.apk | grep -q 'lib/arm64-v8a/' || { echo "MISSING arm64-v8a native libraries"; fail=1; }
-          unzip -l ipo-pulse.apk | grep -q 'lib/armeabi-v7a/' || { echo "MISSING armeabi-v7a native libraries"; fail=1; }
-          unzip -l ipo-pulse.apk | grep -q 'assets/index.android.bundle' || { echo "MISSING the JavaScript bundle - the app would not start"; fail=1; }
-          "$APKSIGNER" verify ipo-pulse.apk >/dev/null || { echo "the APK signature does not verify - Android would refuse it"; fail=1; }
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/' || { echo "MISSING arm64-v8a native libraries"; fail=1; }
+          unzip -l "$APK" | grep -q 'lib/armeabi-v7a/' || { echo "MISSING armeabi-v7a native libraries"; fail=1; }
+          unzip -l "$APK" | grep -q 'assets/index.android.bundle' || { echo "MISSING the JavaScript bundle - the app would not start"; fail=1; }
+          "$APKSIGNER" verify "$APK" >/dev/null || { echo "the APK signature does not verify - Android would refuse it"; fail=1; }
           test "$fail" = 0 || exit 1
           echo "the published APK is complete and its signature verifies"
 
