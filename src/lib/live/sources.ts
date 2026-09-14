@@ -41,6 +41,12 @@ export interface FetchOptions {
   timeoutMs?: number;
   fetcher?: typeof fetch;
   urls?: Partial<Record<LiveUrlKey, string>>;
+  /**
+   * Defaults to MOBILE_UA. The server varies its markup on this header, so a client that
+   * cannot set one (or a proxy) can be checked with `--alternate-agent` in
+   * scripts/live-report.ts before assuming it will see the same tables.
+   */
+  userAgent?: string;
 }
 
 function proxied(url: string, useProxy: boolean): string {
@@ -50,14 +56,15 @@ function proxied(url: string, useProxy: boolean): string {
 async function download(
   fetcher: typeof fetch,
   url: string,
-  timeoutMs: number
+  timeoutMs: number,
+  userAgent = MOBILE_UA
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const controller = typeof AbortController === 'undefined' ? null : new AbortController();
   const timer = setTimeout(() => controller?.abort(), timeoutMs);
   try {
     const response = await fetcher(url, {
       headers: {
-        'User-Agent': MOBILE_UA,
+        'User-Agent': userAgent,
         Accept: 'text/html,application/xhtml+xml',
         'Accept-Language': 'en-IN,en;q=0.9',
       },
@@ -77,12 +84,15 @@ async function download(
 
 /** Downloads every source page in parallel; per-page failures never reject. */
 export async function fetchLivePages(options: FetchOptions = {}): Promise<FetchedPages> {
-  const { useProxy = false, timeoutMs = 15000, fetcher = fetch } = options;
+  const { useProxy = false, timeoutMs = 15000, fetcher = fetch, userAgent } = options;
   const urls = { ...LIVE_URLS, ...options.urls };
   const keys = Object.keys(urls) as LiveUrlKey[];
 
   const results = await Promise.all(
-    keys.map(async (key) => [key, await download(fetcher, proxied(urls[key], useProxy), timeoutMs)] as const)
+    keys.map(
+      async (key) =>
+        [key, await download(fetcher, proxied(urls[key], useProxy), timeoutMs, userAgent)] as const
+    )
   );
 
   const pages: LivePages = {};

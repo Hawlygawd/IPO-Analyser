@@ -10,7 +10,7 @@
  */
 
 import { DATA_AS_OF, DATA_AS_OF_LABEL, IPOT } from '../src/lib/ipoData';
-import { istLabel, pullLiveBoard } from '../src/lib/live';
+import { istLabel, pullLiveBoard, fetchLivePages, parseLivePages } from '../src/lib/live';
 
 async function main() {
   const started = Date.now();
@@ -79,6 +79,23 @@ async function main() {
       `  - e.g. discovered ${sample.name}: band ${sample.priceBandLow ?? '—'}-${sample.priceBandHigh ?? '—'}, ` +
         `lot ${sample.lotSize ?? '—'}, issue ${sample.issueSizeCr ?? '—'} Cr, subscription ${sample.subscription?.total ?? '—'}x, ` +
         `platform ${sample.platform}, opens ${sample.openDate}`
+    );
+  }
+  // Does the server serve the same tables to a client that cannot set a browser user agent
+  // (a React Native build that ignores the header, for instance)?
+  if (!process.argv.includes('--no-alt-agent')) {
+    const alt = await fetchLivePages({ userAgent: 'okhttp/4.12.0' });
+    const parsedAlt = parseLivePages(alt.pages);
+    lines.push('');
+    lines.push(
+      `## Without a browser user agent (okhttp/4.12.0)`
+    );
+    lines.push(
+      `- GMP rows ${parsedAlt.gmp.rows.length}, subscription rows ${parsedAlt.subscription.rows.length}, ` +
+        `cards ${parsedAlt.cards.length}, calendar days ${parsedAlt.calendar.length}`
+    );
+    lines.push(
+      `- ${Object.entries(alt.errors).map(([key, value]) => `${key}: ${value}`).join(', ') || 'no fetch errors'}`
     );
   }
   lines.push('');
