@@ -38,58 +38,32 @@ jobs:
         run: |
           node - <<'NODE' > excerpt.md
           const fs = require('node:fs');
-          const read = (p) => fs.readFileSync(`pages/${p}`, 'utf8');
+          const read = (file) => fs.readFileSync(`pages/${file}`, 'utf8');
+          const cap = (text, n) => (text.length > n ? `${text.slice(0, n)}\n…[+${text.length - n} chars]` : text);
           const out = [];
-          const cap = (x, n) => (x.length > n ? `${x.slice(0, n)}\n…[+${x.length - n}]` : x);
 
-          // 1. full markup of a few event cards, and the date headers they sit under
+          // 1. the calendar body: whole event cards plus the date headers they hang under
           const cal = read('calendar.html');
-          const cards = [...cal.matchAll(/<div class="event-card"([\s\S]{0,4000}?)(?=<div class="event-card"|<div class="event-date"|<\/section>)/g)].map((m) => m[0]);
+          const cards = [...cal.matchAll(/<div class="event-card"[\s\S]{0,4000}?(?=<div class="event-card"|<div class="event-date"|<\/section>)/g)].map((m) => m[0]);
           out.push(`# event-card blocks: ${cards.length}`);
-          cards.slice(0, 3).forEach((c, i) => out.push(`\n## event-card ${i}\n` + cap(c, 2000)));
-          const dates = [...cal.matchAll(/<div class="event-date"[\s\S]{0,600}?<\/div>\s*<\/div>|<div class="event-date"[\s\S]{0,900}?(?=<div class="event-card")/g)].map((m) => m[0]);
-          out.push(`\n\n# event-date headers: ${dates.length}`);
-          dates.slice(0, 3).forEach((d, i) => out.push(`\n## event-date ${i}\n` + cap(d, 900)));
-          out.push(`\n\n# all event-name texts: ${JSON.stringify([...cal.matchAll(/class="event-name"[^>]*>([\s\S]{0,80}?)</g)].map((m) => m[1].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()).slice(0, 20))}`);
-          const badges = [...cal.matchAll(/class="event-(?:badge|type|tag|status)[^"]*"[^>]*>([\s\S]{0,60}?)</g)].map((m) => m[1].replace(/<[^>]*>/g, '').trim());
+          cards.slice(0, 3).forEach((card, i) => out.push(`\n## event-card ${i}\n${cap(card, 2200)}`));
+          const headers = [...cal.matchAll(/<div class="event-date"[\s\S]{0,600}?<\/div>\s*<\/div>/g)].map((m) => m[0]);
+          out.push(`\n\n# event-date headers: ${headers.length}`);
+          headers.slice(0, 3).forEach((h, i) => out.push(`\n## event-date ${i}\n${cap(h, 900)}`));
+          const names = [...cal.matchAll(/class="event-name"[^>]*>([\s\S]{0,80}?)</g)].map((m) => m[1].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim());
+          out.push(`\n\n# event names: ${JSON.stringify(names.slice(0, 20))}`);
+          const badges = [...cal.matchAll(/class="event-[a-z-]*(?:badge|type|tag|status|action)[^"]*"[^>]*>([\s\S]{0,60}?)</g)].map((m) => m[1].replace(/<[^>]*>/g, '').trim());
           out.push(`# event badge texts: ${JSON.stringify([...new Set(badges)].slice(0, 15))}`);
 
-          // 2. a GMP row that has no quote, found by splitting rather than matching the whole tag
-          const gmp = read('gmp.html');
-          const noQuote = gmp.split('<tr').filter((r) => r.includes('data-hasgmp="false"')).slice(0, 2).map((r) => `<tr${r.slice(0, r.indexOf('</tr>') + 5)}`);
-          out.push(`\n\n# no-quote GMP rows found: ${noQuote.length}`);
-          noQuote.forEach((r, i) => out.push(`\n## no-quote row ${i}\n` + cap(r, 1600)));
-
-          console.log(out.join('\n'));
-          const cap = (s, n) => (s.length > n ? `${s.slice(0, n)}\n…[truncated ${s.length - n} chars]` : s);
-
-          // rows without a quote: what does the GMP cell look like then?
-          const gmp = read('gmp.html');
-          const noQuote = [...gmp.matchAll(/<tr class="gmp-row"[\s\S]*?<\/tr>/g)]
-            .map((m) => m[0])
-            .filter((r) => r.includes('data-hasgmp="false"'));
-          out.push(`# GMP page: ${noQuote.length} row(s) without a quote`);
-          noQuote.slice(0, 2).forEach((r) => out.push('\n' + cap(r, 2200)));
-
-          // any page-level "as of" stamp
-          const stamp = [...gmp.matchAll(/[^<>]{0,80}(?:Last updated|Updated on|As of)[^<>]{0,80}/gi)].map((m) => m[0].trim());
-          out.push(`\n\n# as-of stamps on the GMP page: ${JSON.stringify([...new Set(stamp)].slice(0, 8))}`);
-
-          // the calendar body (the head alone matched last time)
-          const cal = read('calendar.html');
-          const body = cal.slice(cal.indexOf('</head>'));
-          const census = {};
-          for (const m of body.matchAll(/class="([^"]+)"/g)) {
-            for (const cls of m[1].split(/\s+/)) {
-              if (/calend|event|month|day/i.test(cls)) census[cls] = (census[cls] ?? 0) + 1;
-            }
-          }
-          out.push(`\n\n# calendar body class census: ${JSON.stringify(Object.entries(census).sort((a, b) => b[1] - a[1]).slice(0, 25))}`);
-          const at = body.search(/class="[^"]*calend/i);
-          out.push(`\n\n# calendar body around the first calendar class (offset ${at})`);
-          out.push(cap(body.slice(Math.max(0, at - 300), at + 6000), 6300));
-          out.push('\n\n# event-ish links in the calendar body');
-          out.push(JSON.stringify([...body.matchAll(/<a[^>]+href="([^"]*ipo[^"]*)"[^>]*>([\s\S]{0,60}?)<\/a>/g)].slice(0, 12).map((m) => [m[1], m[2].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()])));
+          // 2. a GMP row with no quote, found by splitting rather than matching the whole tag
+          const gmpPage = read('gmp.html');
+          const noQuote = gmpPage
+            .split('<tr')
+            .filter((row) => row.includes('data-hasgmp="false"'))
+            .slice(0, 2)
+            .map((row) => `<tr${row.slice(0, row.indexOf('</tr>') + 5)}`);
+          out.push(`\n\n# no-quote GMP rows: ${noQuote.length}`);
+          noQuote.forEach((row, i) => out.push(`\n## no-quote row ${i}\n${cap(row, 1600)}`));
 
           console.log(out.join('\n'));
           NODE
