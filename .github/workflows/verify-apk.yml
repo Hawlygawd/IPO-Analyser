@@ -2,7 +2,8 @@ name: Verify APK
 
 # Proves what is inside the APK that is actually published, without rebuilding it: downloads the
 # release asset and checks the things that decide whether it installs and runs - both ARM ABIs,
-# the Hermes bundle, dex code, and a v1 signature. Runs in about a minute.
+# the Hermes bundle, dex code and an apksigner-verified signature. Runs in about a minute, and
+# writes the checksum back to the release so a download can be verified.
 #
 # Triggered by tags like apk-check-1 (the APK workflow, which matches v*, is deliberately not
 # triggered by that name).
@@ -14,7 +15,7 @@ on:
       - 'apk-check-*'
 
 permissions:
-  contents: read
+  contents: write
   checks: write
 
 jobs:
@@ -37,6 +38,12 @@ jobs:
       - name: Inspect the APK
         run: |
           AAPT2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)"
+          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)"
+
+          # release APKs are signed with the APK Signature Scheme (v2/v3), so there are no
+          # META-INF/*.RSA files to look for - apksigner is the check that actually answers
+          # "will Android install this?"
+          SIGNATURE="$("$APKSIGNER" verify --verbose --print-certs ipo-pulse.apk 2>&1 | head -12)"
           {
             echo "size:    $(du -h ipo-pulse.apk | cut -f1)"
             echo "sha256:  $(cut -d' ' -f1 sha256.txt)"
@@ -44,8 +51,9 @@ jobs:
             echo "abis:    $(unzip -l ipo-pulse.apk | grep -o 'lib/[^/]*/' | sort -u | tr '\n' ' ')"
             echo "bundle:  $(unzip -l ipo-pulse.apk | grep -c 'assets/index.android.bundle') file(s)"
             echo "dex:     $(unzip -l ipo-pulse.apk | grep -c 'classes.*\.dex') file(s)"
-            echo "signature files:"
-            unzip -l ipo-pulse.apk | grep -E 'META-INF/.*\.(RSA|SF|MF)' | sed 's/^/  /'
+            echo
+            echo "signature:"
+            echo "$SIGNATURE" | sed 's/^/  /'
             echo
             echo "manifest:"
             "$AAPT2" dump badging ipo-pulse.apk 2>/dev/null | grep -E "^package|^sdkVersion|^targetSdkVersion|^launchable-activity|^application-label:" | sed 's/^/  /' || echo "  (aapt2 unavailable)"
@@ -55,9 +63,18 @@ jobs:
           unzip -l ipo-pulse.apk | grep -q 'lib/arm64-v8a/' || { echo "MISSING arm64-v8a native libraries"; fail=1; }
           unzip -l ipo-pulse.apk | grep -q 'lib/armeabi-v7a/' || { echo "MISSING armeabi-v7a native libraries"; fail=1; }
           unzip -l ipo-pulse.apk | grep -q 'assets/index.android.bundle' || { echo "MISSING the JavaScript bundle - the app would not start"; fail=1; }
-          unzip -l ipo-pulse.apk | grep -qE 'META-INF/.*\.(RSA|SF)' || { echo "the APK is not signed - Android would refuse it"; fail=1; }
+          "$APKSIGNER" verify ipo-pulse.apk >/dev/null || { echo "the APK signature does not verify - Android would refuse it"; fail=1; }
           test "$fail" = 0 || exit 1
-          echo "the published APK is complete and signed"
+          echo "the published APK is complete and its signature verifies"
+
+      - name: Publish the checksum with the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./app.json').expo.version")"
+          cp sha256.txt "ipo-pulse-${VERSION}.apk.sha256"
+          gh release upload "v${VERSION}" "ipo-pulse-${VERSION}.apk.sha256" --clobber
+          echo "checksum published as ipo-pulse-${VERSION}.apk.sha256"
 
       - name: Publish the report
         if: always()
