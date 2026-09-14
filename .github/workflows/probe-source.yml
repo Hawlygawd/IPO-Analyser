@@ -39,7 +39,7 @@ jobs:
           node - <<'NODE' > excerpt.md
           const fs = require('node:fs');
           const cap = (t, n) => (t.length > n ? `${t.slice(0, n)}…[+${t.length - n}]` : t);
-          const files = ['gmp.html', 'subscription-status.html', 'current-ipo.html', 'upcoming-ipo.html', 'calendar.html'];
+          const files = ['gmp.html', 'subscription.html', 'current.html', 'upcoming.html', 'calendar.html'];
           const out = [];
           for (const f of files) {
             const html = fs.readFileSync(`pages/${f}`, 'utf8');
