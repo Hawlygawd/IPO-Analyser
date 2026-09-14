@@ -19,9 +19,17 @@ import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { JSDOM, VirtualConsole } from 'jsdom';
 import 'fake-indexeddb/auto';
+import { livePageFixtures } from '../src/lib/__tests__/liveFixtures';
 
 const DEV_BUNDLE_URL = process.env.WEB_DEV_BUNDLE_URL ?? '';
 const OUT = process.env.WEB_EXPORT_DIR ?? 'dist';
+/**
+ * Serve the captured upstream markup as the app's own /api/ipoji proxy, so the live path -
+ * fetch, parse, merge, chip, callout and refreshed figures - can be asserted without a
+ * network. The sandbox this runs in cannot reach ipoji.com; the live-parse workflow covers
+ * the real pages.
+ */
+const LIVE_FIXTURES = process.env.WEB_LIVE_FIXTURES === '1';
 
 /** Dev-only noise that is expected and harmless. */
 const WARNING_ALLOWLIST = [
@@ -172,6 +180,22 @@ async function main() {
         return Promise.resolve(this);
       }
     };
+  if (LIVE_FIXTURES) {
+    const fixtureFor = (url: string): string => {
+      const target = decodeURIComponent(url);
+      if (target.includes('/ipo-gmp')) return livePageFixtures.gmp;
+      if (target.includes('subscription-status')) return livePageFixtures.subscription;
+      if (target.includes('current-ipo') || target.includes('upcoming-ipo')) return livePageFixtures.current;
+      if (target.includes('event-calendar')) return livePageFixtures.calendar;
+      return '';
+    };
+    (window as any).fetch = async (url: unknown) => {
+      const text = fixtureFor(String(url));
+      if (!text) return { ok: false, status: 404, text: async () => '' };
+      return { ok: true, status: 200, text: async () => text };
+    };
+  }
+
   (window as any).document.fonts = (window as any).document.fonts ?? {
     add: () => undefined,
     delete: () => undefined,
@@ -256,6 +280,17 @@ async function main() {
   assert.match(root, /IPO Pulse/, 'header title did not render');
   assert.match(root, /issues • (live|snapshot)/, 'the data-status line did not render');
   assert.match(root, /(Live • |Snapshot)/, 'the data-status chip did not render');
+  if (LIVE_FIXTURES) {
+    // the fixtures carry the 14 Sep 5:30 PM pull: Veegaland's quote moved 15 -> 22 and its
+    // subscription 1.24x -> 2.41x, so both must show up on the board
+    assert.match(root, /Live • /, 'live mode: the live chip did not render');
+    assert.match(root, /Live from IPO Ji/, 'live mode: the live callout did not render');
+    assert.match(root, /\+₹22/, 'live mode: the refreshed premium did not reach the board');
+    assert.match(root, /2\.41x/, 'live mode: the refreshed subscription did not reach the card');
+    // the newest upstream stamp replaces the bundled snapshot stamp everywhere it is shown
+    assert.match(root, /live 14 Sep 2026, 5:30 PM IST/, 'live mode: the upstream stamp is missing');
+    assert.ok(!/2:15 PM IST/.test(root), 'live mode: the stale snapshot stamp is still on screen');
+  }
   assert.match(root, /Bidding now/, 'summary tiles did not render');
   assert.match(root, /Open now/, 'no "Open now" phase chip rendered');
   assert.match(root, /Closes /, 'no closing-date line rendered on the cards');
@@ -341,7 +376,8 @@ async function main() {
 
   const premiumOf = (label: string) => Number(/\+([\d.]+)%/.exec(label)?.[1] ?? NaN);
 
-  assert.match(gmpText, /35 shown/, 'the unfiltered row count is wrong');
+  // the count follows the board (the snapshot's 35, or more once a live pull discovers issues)
+  assert.match(gmpText, /\d+ shown • \d+ with a quote/, 'the unfiltered row count is wrong');
   // the list virtualises, so only the first screenful of rows is in the DOM
   const unfilteredCount = gmpRows().length;
   assert.ok(unfilteredCount >= 5, `only ${unfilteredCount} GMP rows rendered`);

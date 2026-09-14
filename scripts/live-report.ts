@@ -45,7 +45,13 @@ async function main() {
       .map((row) => `${row.name} ${row.total}x`)
       .join(', ')}`
   );
-  lines.push(`- Current/upcoming cards: ${parsed.cards.length}`);
+  const withBand = parsed.cards.filter((card) => card.bandHigh !== undefined).length;
+  const withLot = parsed.cards.filter((card) => card.lotSize !== undefined).length;
+  const withSize = parsed.cards.filter((card) => card.issueSizeCr !== undefined).length;
+  const withSubs = parsed.cards.filter((card) => card.subscriptionTotal !== undefined).length;
+  lines.push(
+    `- Current/upcoming cards: ${parsed.cards.length} (band ${withBand}, lot ${withLot}, issue size ${withSize}, subscription ${withSubs})`
+  );
   lines.push(
     `- Calendar: ${parsed.calendar.length} days, ${parsed.calendar.reduce((sum, day) => sum + day.events.length, 0)} events`
   );
@@ -65,6 +71,14 @@ async function main() {
     lines.push(
       `  - ${ipo.name}: GMP ${bundled?.gmp ?? '—'} → ${ipo.gmp ?? 'no quote'}, ` +
         `subscription ${bundled?.subscription?.total ?? '—'}x → ${ipo.subscription?.total ?? '—'}x`
+    );
+  }
+  const sample = board.ipos.filter((ipo) => !IPOT.some((existing) => existing.id === ipo.id))[0];
+  if (sample) {
+    lines.push(
+      `  - e.g. discovered ${sample.name}: band ${sample.priceBandLow ?? '—'}-${sample.priceBandHigh ?? '—'}, ` +
+        `lot ${sample.lotSize ?? '—'}, issue ${sample.issueSizeCr ?? '—'} Cr, subscription ${sample.subscription?.total ?? '—'}x, ` +
+        `platform ${sample.platform}, opens ${sample.openDate}`
     );
   }
   lines.push('');
