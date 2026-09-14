@@ -38,6 +38,13 @@ npm run apk          # prebuild -> prepare sign-off -> gradlew assembleRelease
 
 The APK lands in `android/app/build/outputs/apk/release/`.
 
+**With neither GitHub Actions nor an Android SDK**, Expo's cloud builder does the same job from
+`eas.json` (needs a free Expo account, and `npx eas-cli login` first):
+
+```bash
+npx eas-cli build --platform android --profile preview   # returns an installable APK link
+```
+
 ### Signing
 
 Android will not install an unsigned APK, so every build is signed:
