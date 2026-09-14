@@ -1,0 +1,110 @@
+name: Probe GMP sources
+
+# Temporary reconnaissance: which GMP sources exist, which of them carry a stamp fresher than
+# IPO Ji's evening quote, and whether IPO Ji is serving us a cached copy of its own page.
+# Delete once the second source (or the copy that explains the stamps) is in place.
+
+on:
+  push:
+    tags:
+      - 'probe-gmp-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fetch the candidates
+        run: |
+          set -o pipefail
+          mkdir -p pages
+          MOBILE="Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+          DESKTOP="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+          STAMP=$(date +%s)
+          get() { # name url [ua]
+            local name="$1" url="$2" ua="${3:-$UA}"
+            local code
+            code=$(curl -sS -L -A "$ua" -H 'Cache-Control: no-cache' -D "pages/$name.headers" \
+                   -o "pages/$name.html" -w '%{http_code}' --max-time 25 "$url" 2> "pages/$name.err" || true)
+            printf '%s\t%s\t%s\n' "$name" "$code" "$(wc -c < "pages/$name.html" 2>/dev/null || echo 0)"
+          }
+          : > status.tsv
+          # IPO Ji, four ways: as the app asks, cache-busted, no-cache header, desktop UA
+          get ipoji-gmp                   "https://www.ipoji.com/ipo-gmp"                                   "$MOBILE" >> status.tsv
+          get ipoji-gmp-busted            "https://www.ipoji.com/ipo-gmp?_=${STAMP}"                          "$MOBILE" >> status.tsv
+          get ipoji-gmp-desktop           "https://www.ipoji.com/ipo-gmp"                                     "$DESKTOP" >> status.tsv
+          get ipoji-subs                  "https://www.ipoji.com/ipo-subscription-status-live-bidding-data-bse-nse" "$MOBILE" >> status.tsv
+          get ipoji-subs-busted           "https://www.ipoji.com/ipo-subscription-status-live-bidding-data-bse-nse?_=${STAMP}" "$MOBILE" >> status.tsv
+          # other places that publish grey market premiums
+          get ipowatch                    "https://ipowatch.in/grey-market-premium/"                          "$MOBILE" >> status.tsv
+          get investorzone                "https://www.investorzone.in/gmp/"                                  "$MOBILE" >> status.tsv
+          get chittorgarh                 "https://www.chittorgarh.com/report/ipo-grey-market-premium/"      "$MOBILE" >> status.tsv
+          get ipomarket                   "https://ipomarket.in/"                                             "$MOBILE" >> status.tsv
+          get ipocentral                  "https://ipocentral.in/grey-market-premium/"                        "$MOBILE" >> status.tsv
+          get smeipo                      "https://www.smeipo.in/grey-market-premium/"                        "$MOBILE" >> status.tsv
+          get stockmaniacs                "https://stockmaniacs.net/ipo-gmp/"                                 "$MOBILE" >> status.tsv
+          cat status.tsv
+          echo "--- errors ---"
+          for f in pages/*.err; do [ -s "$f" ] && echo "$f: $(cat "$f")"; done || true
+
+      - name: Summarise what each page says
+        run: |
+          node - <<'NODE' > report.md
+          const fs = require('node:fs');
+          const status = fs.readFileSync('status.tsv', 'utf8').trim().split('\n').map((l) => l.split('\t'));
+          const stampWords = /(?:as\s+of|updated|update|last\s+update[d]?|premium\s+as|gmp\s+as)[^<]{0,80}/gi;
+          const out = ['# GMP sources, probed from a runner', ''];
+          out.push(`Run ${new Date().toISOString()}`, '');
+          out.push('| source | HTTP | bytes | what the page says about its own freshness |');
+          out.push('| --- | --- | --- | --- |');
+          for (const [name, code, bytes] of status) {
+            let text = '';
+            try { text = fs.readFileSync(`pages/${name}.html`, 'utf8'); } catch {}
+            const plain = text.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ');
+            const hits = [...new Set((plain.match(stampWords) || []).map((s) => s.replace(/\s+/g, ' ').trim()))].slice(0, 3);
+            out.push(`| ${name} | ${code} | ${bytes} | ${hits.join(' / ') || '_none found_'} |`);
+          }
+          // headers of the IPO Ji fetches, to see if a CDN is answering from cache
+          for (const name of ['ipoji-gmp', 'ipoji-gmp-busted', 'ipoji-gmp-desktop']) {
+            try {
+              const h = fs.readFileSync(`pages/${name}.headers`, 'utf8').split(/\r?\n/).filter((l) => /^(HTTP|cache-control|age|cf-|etag|last-modified|date|x-vercel|server):/i.test(l));
+              out.push('', `**${name} headers**:`, '```', ...h, '```');
+            } catch {}
+          }
+          // the actual quotes each page carries: the first "As of" block plus 6 number-ish rows
+          for (const [name] of status) {
+            let text = '';
+            try { text = fs.readFileSync(`pages/${name}.html`, 'utf8'); } catch {}
+            if (!text) continue;
+            const plain = text
+              .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+              .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/&nbsp;/g, ' ')
+              .replace(/\s+/g, ' ');
+            const idx = plain.search(/as\s+of\s+\d{1,2}\s+\w+/i);
+            out.push('', `### ${name}`, '');
+            if (idx >= 0) out.push('`' + plain.slice(Math.max(0, idx - 60), idx + 200).trim() + '`', '');
+            const rows = [...plain.matchAll(/₹\s?[\d,]+(?:[.\d]+)?/g)].slice(0, 8).map((m) => m[0]);
+            out.push(`rupee figures on the page (first 8): ${rows.join(', ') || '_none_'}`, '');
+            out.push(`tables: ${(text.match(/<table/gi) || []).length}, rows: ${(text.match(/<tr/gi) || []).length}`, '');
+          }
+          console.log(out.join('\n'));
+          NODE
+          wc -c report.md
+
+      - name: Publish the report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          head -c 60000 report.md > part-1.md
+          jq -Rs '{name: "gmp-sources", head_sha: env.SHA, status: "completed", conclusion: "neutral",
+                   output: {title: "Which GMP sources exist, and how fresh each one is", summary: .}}' part-1.md > payload.json
+          gh api "repos/${{ github.repository }}/check-runs" -X POST --input payload.json >/dev/null && echo published || echo "could not publish"
