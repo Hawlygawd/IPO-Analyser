@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { checkKey, chat, errorHint, errorMessage, listModels } from '../ai/client';
+import { checkKey, chat, errorHint, errorMessage, listModels, redact } from '../ai/client';
 import { boardPrompt, coerceRow, extractJsonArray, extractRows, picksForSearch, toIsoInstant, toNumber } from '../ai/extract';
 import { aiBoardSearch, aiIdleStatus, aiSourceStatus } from '../ai/search';
 import { candidatesForKey, detectProvider, looksLikeKey, pickModel, selectableModels } from '../ai/providers';
@@ -193,6 +193,39 @@ test('an empty model list never looks like a working key', async () => {
   const listed = await listModels({ spec, baseUrl: spec.baseUrl }, 'gsk_abcdefghijklmnopqrst', { fetcher });
   assert.equal(listed.ok, true);
   assert.deepEqual(listed.models, []);
+});
+
+test('a 400 that talks about the key is read as a key rejection', () => {
+  // Google and xAI answer a bad key with 400, not 401 - the message is the only signal
+  assert.match(errorHint(400, 'API key not valid. Please pass a valid API key.'), /rejected this key/);
+  assert.match(errorHint(400, 'Incorrect API key provided'), /rejected this key/);
+  assert.match(errorHint(403, 'Unauthorized'), /rejected this key/);
+  // ... while a 400 about anything else keeps the request hint
+  assert.match(errorHint(400, 'model gemini-9 does not exist'), /did not like the request/);
+  assert.equal(errorHint(400, 'totally fine'), 'the provider did not like the request (usually a model name it does not serve)');
+});
+
+test('a key echoed back by a provider is masked before it reaches the screen', () => {
+  const key = 'AIzaSyD-1234567890abcdefghijklmnopqrs';
+  const masked = redact(`Incorrect API key provided: ${key}`, key);
+  assert.ok(!masked.includes(key), 'the key survived redaction');
+  assert.match(masked, /AIza••••rs/);
+});
+
+test('a public model list is not mistaken for a working key', async () => {
+  // OpenRouter and NVIDIA serve /models to anyone, so the chat call is what decides
+  const key = 'sk-or-v1-abcdefghijklmnop';
+  const { fetcher, calls } = fakeFetch([
+    { match: /openrouter\.ai\/api\/v1\/models/, json: { data: [{ id: 'google/gemini-2.5-flash:free' }] } },
+    { match: /openrouter\.ai\/api\/v1\/chat\/completions/, status: 401, json: { error: { message: 'No auth credentials found' } } },
+  ]);
+
+  const result = await checkKey({ key, providerId: 'openrouter', fetcher });
+  assert.equal(result.ok, false);
+  assert.equal(result.steps.some((step) => step.label.includes('key accepted')), false, 'no step may claim the key was accepted');
+  assert.ok(result.steps.some((step) => step.label.includes('model list') && step.ok));
+  assert.match(result.hint ?? '', /rejected this key/);
+  assert.equal(calls.length, 2);
 });
 
 test('provider errors are read out of every dialect', () => {

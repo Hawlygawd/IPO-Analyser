@@ -48,7 +48,7 @@ async function keyless(): Promise<void> {
     const verdict = listed.status === 401 || listed.status === 403 ? 'reachable (rejects the fake key)' : listed.ok ? 'reachable (accepted!)' : 'check me';
     lines.push(`- **${spec.label}** (${spec.api} dialect): ${status} - ${verdict}`);
     lines.push(`  - message: ${String(listed.error ?? '').slice(0, 200)}`);
-    lines.push(`  - hint the app would show: ${errorHint(listed.status) || '(none needed)'}`);
+    lines.push(`  - hint the app would show: ${errorHint(listed.status, String(listed.error ?? '')) || '(none needed)'}`);
   }
 }
 

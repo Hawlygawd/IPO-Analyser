@@ -118,9 +118,19 @@ export function errorMessage(body: string): string {
   }
 }
 
-/** Turns a status code into something a phone user can act on. */
-export function errorHint(status: number): string {
-  if (status === 401 || status === 403) {
+/**
+ * Turns a status code (and, when we have it, the provider's own words) into something a
+ * phone user can act on.
+ *
+ * The status alone is not enough: Google and xAI answer a bad key with HTTP 400 and a
+ * message, while OpenRouter and NVIDIA serve their model list to anyone and only fail
+ * later - so the message is what tells the two cases apart.
+ */
+export function errorHint(status: number, message = ''): string {
+  const keyish = /api[ _-]?key|invalid.{0,20}key|key.{0,20}invalid|unauthor|authentication|credential|forbidden|permission/i.test(
+    message
+  );
+  if (status === 401 || status === 403 || ((status === 400 || status === 402) && keyish)) {
     return 'the provider rejected this key - check it was copied whole, and that the key is active';
   }
   if (status === 404) return 'the endpoint or model name was not found for this provider';
@@ -129,6 +139,12 @@ export function errorHint(status: number): string {
   if (status === 400) return 'the provider did not like the request (usually a model name it does not serve)';
   if (status >= 500) return 'the provider had a server error - try again in a minute';
   return '';
+}
+
+/** Never let a provider echo the user's key back into the UI: mask it on the way in. */
+export function redact(text: string, key: string): string {
+  if (!text || !key || key.length < 8) return text;
+  return text.split(key).join(`${key.slice(0, 4)}••••${key.slice(-2)}`);
 }
 
 interface RequestShape {
@@ -208,7 +224,7 @@ export async function listModels(
     http
   );
   if (!attempt.ok) {
-    const detail = attempt.error ?? errorMessage(attempt.text) ?? 'the provider refused the request';
+    const detail = redact(attempt.error ?? errorMessage(attempt.text) ?? 'the provider refused the request', key);
     return {
       ok: false,
       models: [],
@@ -346,7 +362,7 @@ export async function chat(
   }
 
   if (!attempt.ok) {
-    const detail = attempt.error ?? errorMessage(attempt.text) ?? `HTTP ${attempt.status}`;
+    const detail = redact(attempt.error ?? errorMessage(attempt.text) ?? 'the provider refused the request', key);
     return {
       ok: false,
       text: '',
@@ -355,8 +371,8 @@ export async function chat(
       search: effectiveSearch,
       ms: attempt.ms,
       error: `${detail}${attempt.status ? ` (HTTP ${attempt.status})` : ''}`,
-      hint: errorHint(attempt.status),
-      raw: attempt.text.slice(0, 600),
+      hint: errorHint(attempt.status, detail),
+      raw: redact(attempt.text.slice(0, 600), key),
     };
   }
 
@@ -442,23 +458,23 @@ export async function checkKey(options: KeyCheckOptions): Promise<KeyCheckResult
     let models = selectableModels(listed.models);
     if (spec.listsModels) {
       if (!listed.ok) {
-        const error = listed.error ?? `HTTP ${listed.status}`;
+        const error = redact(listed.error ?? `HTTP ${listed.status}`, key);
         tried.push({ providerId: spec.id, label: spec.label, error });
         steps.push({
           label: `${spec.label}: model list`,
           ok: false,
-          detail: `${error}${errorHint(listed.status) ? ` - ${errorHint(listed.status)}` : ''}`,
+          detail: `${error}${errorHint(listed.status, error) ? ` - ${errorHint(listed.status, error)}` : ''}`,
           ms: listed.ms,
         });
         if (pinned) {
-          return fail(spec, target.model ?? spec.modelFallback, error, errorHint(listed.status));
+          return fail(spec, target.model ?? spec.modelFallback, error, errorHint(listed.status, error));
         }
         continue;
       }
       steps.push({
-        label: `${spec.label}: key accepted`,
+        label: `${spec.label}: model list`,
         ok: true,
-        detail: `${models.length} model${models.length === 1 ? '' : 's'} reachable`,
+        detail: `${models.length} model${models.length === 1 ? '' : 's'} listed${spec.listsModels ? ' (some providers list models without checking the key)' : ''}`,
         ms: listed.ms,
       });
     } else {
@@ -488,6 +504,11 @@ export async function checkKey(options: KeyCheckOptions): Promise<KeyCheckResult
       });
       if (reply.ok) {
         steps.push({ label: `${spec.label}: ${model}`, ok: true, detail: `answered in ${(reply.ms / 1000).toFixed(1)}s`, ms: reply.ms });
+        steps.push({
+          label: `${spec.label}: key accepted`,
+          ok: true,
+          detail: 'the provider answered a real request with this key',
+        });
         return {
           ok: true,
           providerId: spec.id,
@@ -506,7 +527,7 @@ export async function checkKey(options: KeyCheckOptions): Promise<KeyCheckResult
       if (reply.status === 401 || reply.status === 403) break; // the key is wrong for this provider
     }
 
-    tried.push({ providerId: spec.id, label: spec.label, error: lastError || 'no model answered' });
+    tried.push({ providerId: spec.id, label: spec.label, error: redact(lastError, key) || 'no model answered' });
     if (pinned) return fail(spec, target.model ?? spec.modelFallback, lastError, lastHint, models);
     if (answered) break;
   }
