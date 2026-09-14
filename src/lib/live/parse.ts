@@ -12,6 +12,11 @@
  *   /ipo-event-calendar          -> an inline `eventListData = [...]` JSON array that
  *                                   drives the calendar (this one is not markup at all)
  *
+ * The second GMP board (ipomarket.in) is read for the same reason: it refreshes every 30
+ * minutes and stamps every row, which is what makes a 9 PM phone show a 9 PM quote instead of
+ * the evening one. Its markup was mirrored with a throwaway probe workflow, captured into
+ * liveFixtures.ts, and the workflow was deleted once the parser had the shape.
+ *
  * Everything here is pure: give it HTML, get typed rows back. Network lives in
  * sources.ts, merging lives in merge.ts.
  */

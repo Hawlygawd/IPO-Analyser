@@ -224,7 +224,8 @@ export const CALENDAR_JSON = `eventListData = [{"date":"2026-09-14","events":[{"
 export const CALENDAR_HTML = `<html><body><script>const other = 1;\n        ${CALENDAR_JSON}\n        window.eventListData = eventListData;</script></body></html>`;
 
 /**
- * The second GMP source, mirroring ipomarket.in/gmp/ as it really renders (probed from CI):
+ * The second GMP source, mirroring ipomarket.in/gmp/ as it really renders (mirrored from a
+ * runner while the source was being added; the probe workflow was deleted once this existed):
  * a server-rendered table whose every row carries `<time dateTime="...Z">`. Three rows, each
  * proving one merge rule:
  *  - Kanohar Electricals: 8:45 PM, newer than the IPO Ji fixture, so it must win;
