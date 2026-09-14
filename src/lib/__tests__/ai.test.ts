@@ -617,3 +617,35 @@ test('a retired model name does not stop the live search either', async () => {
   assert.equal(result.model, 'gemini-3.5-flash-lite');
   assert.equal(result.rows.length, 1);
 });
+
+test('a slow network cannot hold the dry check open model after model', async () => {
+  const key = 'AIzaSyD-1234567890abcdefghijklmnopqrs';
+  let calls = 0;
+  const fetcher = (async (url: string) => {
+    calls += 1;
+    if (/v1beta\/models$/.test(url)) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            models: ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.5-pro'].map((id) => ({
+              name: `models/${id}`,
+              supportedGenerationMethods: ['generateContent'],
+            })),
+          }),
+      } as unknown as Response;
+    }
+    // every model hangs: the check must give up on its own budget, not on the caller's patience
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    throw new Error('Network request timed out');
+  }) as unknown as typeof fetch;
+
+  const started = Date.now();
+  const result = await checkKey({ key, providerId: 'gemini', fetcher, checkBudgetMs: 300 });
+  const elapsed = Date.now() - started;
+  assert.equal(result.ok, false);
+  assert.ok(elapsed < 3000, `the check took ${elapsed}ms despite a 300ms budget`);
+  assert.ok(calls <= 1 + MODEL_ATTEMPT_LIMIT + 1, `it made ${calls} attempts`);
+  assert.match(result.hint ?? '', /too slow|Network request timed out/);
+});

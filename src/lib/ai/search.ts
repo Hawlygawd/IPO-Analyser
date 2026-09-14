@@ -38,6 +38,8 @@ export interface AiSearchOptions extends AiHttpOptions {
   limit?: number;
   /** how many models to try on one provider before giving up (default 3) */
   modelAttempts?: number;
+  /** wall-clock cap for the model walk (default 75s) */
+  searchBudgetMs?: number;
   now?: Date;
 }
 
@@ -174,9 +176,12 @@ export async function aiBoardSearch(bundled: IPO[], options: AiSearchOptions): P
     // One refusal is not a verdict on the key: providers retire model names and have demand
     // spikes per model. Try the next few, and stop early when the key itself was rejected.
     const searchAttempts = Math.max(1, Math.min(options.modelAttempts ?? 3, candidates.length));
+    // three slow timeouts must not hold a refresh open indefinitely
+    const deadline = started + (options.searchBudgetMs ?? 75000);
     for (const next of candidates.slice(1, searchAttempts)) {
       if (reply.ok) break;
       if (reply.status === 401 || reply.status === 403) break;
+      if (Date.now() > deadline) break;
       reply = await chat({ spec, baseUrl, model: next }, key, prompt, { ...options, search: wanted });
       model = next;
       servedByFallback = true;

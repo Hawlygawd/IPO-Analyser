@@ -218,7 +218,7 @@ Quality gates:
 ```bash
 npm run check:deps   # native dependencies must match the versions Expo SDK 57 ships
 npm run typecheck    # strict TS, app config + node config for scripts/tests
-npm test             # 98 unit tests (tsx --test): data integrity, formatting, analysis, board,
+npm test             # 99 unit tests (tsx --test): data integrity, formatting, analysis, board,
                      # reminders, live parsing + merge, and the AI key layer against fake providers
 npm run board        # prints the board as the app sees it (npm run board -- gmp for the ranking)
 npm run build:web    # static web export into dist/

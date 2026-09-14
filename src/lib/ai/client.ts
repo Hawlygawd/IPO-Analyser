@@ -422,6 +422,8 @@ export interface KeyCheckOptions extends AiHttpOptions {
   maxCandidates?: number;
   /** How many models to try on one provider before giving up on it (default 6). */
   maxModelAttempts?: number;
+  /** Wall-clock cap for the whole check (default 90s), so six slow timeouts cannot hang it. */
+  checkBudgetMs?: number;
 }
 
 /**
@@ -501,11 +503,16 @@ export async function checkKey(options: KeyCheckOptions): Promise<KeyCheckResult
       Math.min(options.maxModelAttempts ?? MODEL_ATTEMPT_LIMIT, candidates.length || 1)
     );
 
+    const deadline = started + (options.checkBudgetMs ?? 90000);
     let lastError = '';
     let lastHint = '';
     let lastStatus = 0;
     let answered = false;
     for (const model of candidates.slice(0, attemptLimit)) {
+      if (Date.now() > deadline) {
+        lastHint = 'the provider was too slow to answer within a minute and a half - try again on a better connection';
+        break;
+      }
       const reply = await chat({ spec, baseUrl: target.baseUrl, model }, key, PING, {
         ...options,
         chatTimeoutMs: options.chatTimeoutMs ?? 45000,
