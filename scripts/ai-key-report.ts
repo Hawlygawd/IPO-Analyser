@@ -36,8 +36,10 @@ async function keyless(): Promise<void> {
   lines.push('# AI provider reachability (no key)');
   lines.push('');
   lines.push('Every provider below is called with a deliberately invalid key. `HTTP 401` is the');
-  lines.push('healthy answer: it proves the endpoint is reachable from a runner and that the app');
-  lines.push('turns the provider error into something a person can read.');
+  lines.push('expected answer: it proves the endpoint is reachable from a runner and that the app');
+  lines.push('turns that provider error into something a person can read. A `400` that names the key');
+  lines.push('as the problem (Google, xAI) counts as a rejection too, while a green model list means');
+  lines.push('nothing for a provider that serves models without checking the key.');
   lines.push('');
   for (const spec of AI_PROVIDERS) {
     if (!spec.listsModels || !spec.baseUrl) continue;
@@ -45,7 +47,20 @@ async function keyless(): Promise<void> {
       listTimeoutMs: 15000,
     });
     const status = listed.status === 0 ? 'no response' : `HTTP ${listed.status}`;
-    const verdict = listed.status === 401 || listed.status === 403 ? 'reachable (rejects the fake key)' : listed.ok ? 'reachable (accepted!)' : 'check me';
+    // A 200 here is not proof the key works: OpenRouter and NVIDIA serve their model list to
+    // anyone, so say exactly what happened instead of claiming the key was accepted.
+    const verdict =
+      listed.status === 401 || listed.status === 403
+        ? 'reachable (rejects the fake key)'
+        : listed.ok && spec.listsModels
+          ? 'reachable (lists models without checking the key)'
+          : listed.ok
+            ? 'reachable (models listed)'
+            : listed.status >= 500
+              ? 'reachable, but the provider had a server error'
+              : listed.status === 0
+                ? 'no response'
+                : 'reachable (the app turns this into a readable message)';
     lines.push(`- **${spec.label}** (${spec.api} dialect): ${status} - ${verdict}`);
     lines.push(`  - message: ${String(listed.error ?? '').slice(0, 200)}`);
     lines.push(`  - hint the app would show: ${errorHint(listed.status, String(listed.error ?? '')) || '(none needed)'}`);

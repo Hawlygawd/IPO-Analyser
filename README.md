@@ -174,7 +174,9 @@ Honesty is enforced rather than promised:
 - Before you rely on a key there are two dry checks in Settings: **Test this key** proves it
   authenticates and a model actually answers (and reports exactly which one), and **Dry-run a
   search** proves the figures that come back can be parsed and merged. Both are also runnable from
-  the terminal/CI with `scripts/ai-key-report.ts`.
+  the terminal/CI with `scripts/ai-key-report.ts`. A model list on its own is not proof of a key -
+  OpenRouter and NVIDIA answer `/models` to anyone - so *key accepted* only appears once a model
+  has answered a real request.
 - There is no invented premium history: the app shows the recorded quote, the implied listing
   price and a **demand score** computed from that quote and the published subscription multiples.
 - Unconfirmed dates are marked `tentative`, and the UI never claims to predict a listing price.
