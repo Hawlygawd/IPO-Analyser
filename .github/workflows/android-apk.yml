@@ -51,6 +51,18 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # A cold Gradle build spends most of its time downloading dependencies and recompiling
+      # Reanimated/Worklets C++ for each ABI; the cache takes that off every run after the first.
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
       - name: Install dependencies
         run: npm ci
 
@@ -177,11 +189,14 @@ jobs:
 
           Built from commit ${GITHUB_SHA} by the [Android APK workflow](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}).
           NOTES
+          # publish the hash next to the APK so a download can be checked
+          sha256sum "ipo-pulse-${VERSION}.apk" > "ipo-pulse-${VERSION}.apk.sha256"
+          cat "ipo-pulse-${VERSION}.apk.sha256"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "ipo-pulse-${VERSION}.apk" --clobber
+            gh release upload "$TAG" "ipo-pulse-${VERSION}.apk" "ipo-pulse-${VERSION}.apk.sha256" --clobber
             gh release edit "$TAG" --notes-file release-notes.md
           else
-            gh release create "$TAG" "ipo-pulse-${VERSION}.apk" \
+            gh release create "$TAG" "ipo-pulse-${VERSION}.apk" "ipo-pulse-${VERSION}.apk.sha256" \
               --title "IPO Pulse ${VERSION} - Android APK" \
               --notes-file release-notes.md
           fi

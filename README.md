@@ -32,11 +32,13 @@ runs on a phone with no Metro, no dev server and no network.
 the phone, tap the `.apk` under Assets, and allow installs from that source when Android asks.
 Android 7.0 (API 24) or newer; the APK carries both 64-bit and 32-bit ARM libraries.
 
-**Check a download:** the *Verify APK* workflow fetches the published asset and asserts the things
-that decide whether it installs and starts - both ARM ABIs, the Hermes bundle, dex code and an
-`apksigner`-verified signature - then reports into a check run. Trigger it with a tag
-(`git tag apk-check-1 && git push origin apk-check-1`); the *Run workflow* button only appears once
-the workflow is on the default branch.
+**Check a download:** each release carries the APK's `sha256` next to it
+(`sha256sum -c ipo-pulse-<version>.apk.sha256`), and the *Verify APK* workflow downloads the
+published asset and
+asserts the things that decide whether it installs and starts - both ARM ABIs, the Hermes bundle,
+dex code and an `apksigner`-verified signature - then reports into a check run. Trigger it with a
+tag (`git tag apk-check-1 && git push origin apk-check-1`); the *Run workflow* buttons in the
+Actions tab only appear once these workflows are on the default branch.
 
 **Build a fresh one:** Actions -> *Android APK* -> *Run workflow*. The run produces the APK as an
 artifact and, with *publish a GitHub Release* ticked, a public download link. The workflow runs
@@ -98,7 +100,9 @@ Two layers, in this order:
 
    Live rows are matched to the snapshot by upstream slug, then by normalised name, and only the
    fields that page actually published are overwritten. Issues that exist only live (a new SME
-   opening, say) are appended - with derived milestone dates still marked tentative.
+   opening, say) are appended - with derived milestone dates still marked tentative - and an issue
+   whose dates upstream has not announced yet is left out rather than given a placeholder date
+   (those cards print "TBA" over a `2050-01-01` sentinel upstream, which the parser drops).
 
 2. **The bundled snapshot.** `src/lib/ipoData.ts` ships with the app: 35 curated issues, their
    sectors, lot sizes and issue sizes. It renders instantly on launch, survives being offline, and
