@@ -38,33 +38,20 @@ jobs:
         run: |
           node - <<'NODE' > excerpt.md
           const fs = require('node:fs');
-          const read = (file) => fs.readFileSync(`pages/${file}`, 'utf8');
-          const cap = (text, n) => (text.length > n ? `${text.slice(0, n)}\n…[+${text.length - n} chars]` : text);
+          const cap = (t, n) => (t.length > n ? `${t.slice(0, n)}…[+${t.length - n}]` : t);
+          const files = ['gmp.html', 'subscription-status.html', 'current-ipo.html', 'upcoming-ipo.html', 'calendar.html'];
           const out = [];
-          const cal = read('calendar.html');
-
-          // where does eventListData come from?
-          const defs = [...cal.matchAll(/eventListData\s*=\s*[^;]{0,4000}/g)];
-          out.push(`# eventListData assignments: ${defs.length}`);
-          defs.slice(0, 2).forEach((d, i) => out.push(`\n## assignment ${i}\n${cap(d[0], 4000)}`));
-
-          // day headers, tolerantly: any element carrying event-date / event-date-title / event-count
-          const dayEls = [...cal.matchAll(/<[a-z]+\b[^>]*\bclass="[^"]*\bevent-(?:date|date-title|count)\b[^"]*"[^>]*>[\s\S]{0,400}?<\/[a-z]+>/g)];
-          out.push(`\n\n# day header elements: ${dayEls.length}`);
-          dayEls.slice(0, 4).forEach((d, i) => out.push(`\n## day header ${i}\n${cap(d[0].replace(/\s+/g, ' '), 800)}`));
-
-          // the badge texts that mark the event kind
-          const badges = [...cal.matchAll(/<span\b[^>]*\bclass="[^"]*\bbadge_span\b[^"]*"[^>]*>([\s\S]{0,120}?)<\/span>/g)]
-            .map((m) => m[1].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim())
-            .filter((t) => t && !/^(Mainboard|BSE SME|NSE SME|SME)$/i.test(t));
-          out.push(`\n\n# event kind badges present: ${JSON.stringify([...new Set(badges)].slice(0, 12))}`);
-
-          // a card's full text, and the nearest date header before it
-          const opens = [...cal.matchAll(/<[a-z]+\b[^>]*\bclass="[^"]*\bevent-card\b[^"]*"[^>]*>/g)];
-          if (opens.length) {
-            const at = opens[1].index;
-            const before = cal.slice(Math.max(0, at - 1200), at);
-            out.push(`\n\n# markup immediately before the second card:\n${cap(before.replace(/\s+/g, ' '), 1200)}`);
+          for (const f of files) {
+            const html = fs.readFileSync(`pages/${f}`, 'utf8');
+            const assigns = [...html.matchAll(/\b([A-Za-z_$][\w$]*)\s*=\s*\[\s*\{/g)].map((m) => m[1]);
+            const parses = [...html.matchAll(/JSON\.parse\(\s*([^)]{0,80})/g)].map((m) => cap(m[1].replace(/\s+/g, ' '), 80));
+            out.push(`\n=== ${f} (${html.length} bytes)`);
+            out.push(`array-of-object assignments: ${JSON.stringify([...new Set(assigns)])}`);
+            out.push(`JSON.parse args: ${JSON.stringify([...new Set(parses)])}`);
+            for (const name of [...new Set(assigns)].slice(0, 2)) {
+              const i = html.search(new RegExp(`\\b${name}\\s*=\\s*\\[\\s*\\{`));
+              out.push(`--- ${name} sample: ${cap(html.slice(i, i + 700), 700)}`);
+            }
           }
           console.log(out.join('\n'));
           NODE
