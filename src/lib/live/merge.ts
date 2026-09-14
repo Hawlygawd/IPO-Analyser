@@ -305,6 +305,9 @@ function buildIpo(id: string, row: LiveRow, now: Date): IPO | null {
   // stays empty rather than claiming a listing we cannot back up.
   const publishedPlatform = [row.gmp?.platform, row.sub?.platform, row.card ? undefined : row.events[0]?.board]
     .find((value): value is string => Boolean(value && /^(nse|bse)( sme)?$/i.test(value))) as Platform | undefined;
+  // a card badge sometimes names the exchanges ("BSE, NSE"), which is the only place upstream
+  // says anything about a mainboard issue's listing venue
+  const namedExchanges = row.card?.exchanges ?? [];
   const tentative: MilestoneKey[] = [];
 
   const eventDate = (status: MilestoneKey) =>
@@ -319,7 +322,9 @@ function buildIpo(id: string, row: LiveRow, now: Date): IPO | null {
     id,
     name,
     segment,
-    platform: publishedPlatform ?? (segment === 'SME' ? 'BSE SME' : 'NSE'),
+    platform:
+      publishedPlatform ??
+      (segment === 'SME' ? 'BSE SME' : ((namedExchanges[0] as Platform) || 'NSE')),
     openDate,
     closeDate,
     allotmentDate,
@@ -329,7 +334,7 @@ function buildIpo(id: string, row: LiveRow, now: Date): IPO | null {
     priceBandHigh: row.gmp?.bandHigh ?? row.card?.bandHigh ?? row.card?.bandLow,
     lotSize: row.card?.lotSize,
     issueSizeCr: row.card?.issueSizeCr,
-    exchanges: publishedPlatform ? [publishedPlatform] : [],
+    exchanges: publishedPlatform ? [publishedPlatform] : namedExchanges,
     gmp: row.gmp?.gmp ?? row.card?.premiumHigh ?? row.card?.premiumLow,
     gmpUpdated: row.gmp?.updatedAt,
     subscription:

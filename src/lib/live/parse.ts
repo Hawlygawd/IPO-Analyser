@@ -69,6 +69,8 @@ export interface LiveCard {
   lotSize?: number;
   issueSizeCr?: number;
   subscriptionTotal?: number;
+  /** exchanges named on the card's market badge, when it names any at all */
+  exchanges: string[];
   openDate?: string;
   closeDate?: string;
   url?: string;
@@ -188,6 +190,38 @@ export function slugToId(slug: string | undefined, name?: string): string {
 }
 
 const PLATFORMS = ['NSE SME', 'BSE SME', 'NSE', 'BSE'];
+
+/** Upstream pads an unknown date with this sentinel and prints "TBA" over it. */
+const SENTINEL_YEAR = 2040;
+
+function within(value: number | undefined, min: number, max: number): number | undefined {
+  return value !== undefined && value >= min && value <= max ? value : undefined;
+}
+
+/** "₹210 Cr", "₹2800 Crores Approx", "₹3,500–4,500 Cr Approx" -> crore figure. */
+export function issueSizeCr(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const range = /([\d,.]+)\s*[-–]\s*([\d,.]+)/.exec(raw);
+  // a range is priced off the upper band, so the upper number is the one to quote
+  return within(num(range ? range[2] : raw), 0.1, 200000);
+}
+
+/** "BSE, NSE" / "NSE SME" / "Mainboard" -> the exchange list, when one is named. */
+export function badgeExchanges(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const found = raw.toUpperCase().match(/\b(NSE|BSE)\b/g) ?? [];
+  return [...new Set(found)];
+}
+
+/** The `index`-th <time> on a card, ignoring upstream's TBA sentinel. */
+function cardDate(body: string, index: number): string | undefined {
+  const times = [...body.matchAll(/<time\b[^>]*\bdatetime="([^"]+)"[^>]*>([\s\S]*?)<\/time>/g)];
+  const entry = times[index];
+  if (!entry) return undefined;
+  const iso = toIsoDate(entry[2]) ?? toIsoDate(entry[1]);
+  if (!iso) return undefined;
+  return Number(iso.slice(0, 4)) >= SENTINEL_YEAR ? undefined : iso;
+}
 
 function platformOf(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
@@ -358,7 +392,7 @@ export function parseIpoCards(html: string): LiveCard[] {
       stats.set(textOf(match[1]).toLowerCase(), textOf(match[2]));
     }
 
-    const times = [...body.matchAll(/<time\b[^>]*\bdatetime="([^"]+)"[^>]*>/g)].map((m) => m[1]);
+    const badge = textOf(/class="ipo-card-market-badge"[^>]*>([\s\S]*?)<\/span>/.exec(body)?.[1] ?? '');
     const premiumText = stats.get('exp. premium') ?? '';
     const premiumRange = /([\d,.]+)\s*[-–]\s*([\d,.]+)/.exec(premiumText);
     const offer = stats.get('offer price') ?? stats.get('price band') ?? '';
@@ -372,13 +406,14 @@ export function parseIpoCards(html: string): LiveCard[] {
       premiumLow: premiumRange ? num(premiumRange[1]) : num(premiumText),
       premiumHigh: premiumRange ? num(premiumRange[2]) : undefined,
       premiumPct: num(/\((\d+(?:\.\d+)?)%\)/.exec(premiumText)?.[1]),
-      bandLow: offerRange ? num(offerRange[1]) : num(offer),
-      bandHigh: offerRange ? num(offerRange[2]) : undefined,
-      lotSize: num(stats.get('lot size')),
-      issueSizeCr: num(stats.get('issue size')),
-      subscriptionTotal: num(stats.get('subscription')),
-      openDate: toIsoDate(times[0]),
-      closeDate: toIsoDate(times[1]),
+      bandLow: within(offerRange ? num(offerRange[1]) : num(offer), 0.5, 100000),
+      bandHigh: within(offerRange ? num(offerRange[2]) : undefined, 0.5, 100000),
+      lotSize: within(num(stats.get('lot size')), 1, 100000),
+      issueSizeCr: issueSizeCr(stats.get('issue size')),
+      subscriptionTotal: within(num(stats.get('subscription')), 0, 100000),
+      exchanges: badgeExchanges(badge),
+      openDate: cardDate(body, 0),
+      closeDate: cardDate(body, 1),
       url: href ? `https://www.ipoji.com${href.startsWith('/') ? '' : '/'}${href}` : undefined,
     });
   });

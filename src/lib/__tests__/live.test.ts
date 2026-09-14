@@ -122,8 +122,8 @@ test('subscription rows carry every leg, the total and the snapshot stamp', () =
 
 test('ipo cards give the band, the expected premium, lot, size and the bidding window', () => {
   const cards = parseIpoCards(CARDS_HTML);
-  assert.equal(cards.length, 2);
-  const [hero, jio] = cards;
+  assert.equal(cards.length, 3);
+  const [hero, veritas, jio] = cards;
   assert.equal(hero.id, 'hero-motors');
   assert.equal(hero.segment, 'Mainboard');
   assert.equal(hero.status, 'current');
@@ -146,6 +146,26 @@ test('ipo cards give the band, the expected premium, lot, size and the bidding w
   assert.equal(jio.lotSize, 12);
   assert.equal(jio.issueSizeCr, 12000);
   assert.equal(jio.premiumLow, undefined); // this card publishes no expected premium
+
+  // an unannounced issue: upstream prints TBA over the 2050-01-01 sentinel and "₹N/A"
+  // placeholders, so none of that may leak into the app
+  assert.equal(veritas.id, 'veritas-finance');
+  assert.equal(veritas.openDate, undefined);
+  assert.equal(veritas.closeDate, undefined);
+  assert.equal(veritas.bandLow, undefined);
+  assert.equal(veritas.lotSize, undefined);
+  assert.equal(veritas.issueSizeCr, 4500); // "₹3,500–4,500 Cr Approx" -> the upper bound
+  assert.deepEqual(veritas.exchanges, ['BSE', 'NSE']);
+  assert.equal(veritas.segment, 'SME');
+});
+
+test('an issue with no announced dates is not added to the board', () => {
+  const parsed = parseLivePages(pages);
+  const board = mergeBoard(IPOT, parsed, { fetchedAt: Date.parse('2026-09-14T12:31:00Z'), sources: [] });
+  assert.ok(
+    !board.ipos.some((ipo) => ipo.id === 'veritas-finance'),
+    'a TBA card must not become a board row with a placeholder date'
+  );
 });
 
 /* ------------------------------------------------------------------ calendar */
@@ -181,7 +201,7 @@ test('source statuses report per-board health', () => {
   assert.equal(byKey.gmp.ok, true);
   assert.equal(byKey.gmp.rows, 3);
   assert.equal(byKey.subscription.rows, 2);
-  assert.equal(byKey.cards.rows, 2);
+  assert.equal(byKey.cards.rows, 3);
   assert.equal(byKey.calendar.ok, false);
   assert.equal(byKey.calendar.error, 'timed out');
 });

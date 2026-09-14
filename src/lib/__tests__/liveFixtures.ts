@@ -161,6 +161,38 @@ export const CARDS_HTML = `
 </article>
 
 <article class="card ipo-card ipo-card-new mb-0 "
+  id="ipo-card-ipo-list-veritas-finance-ipo"
+  data-agent-href="/ipo/veritas-finance-ipo"
+  data-ipo-status="current"
+  data-ipo-board="sme">
+  <header class="ipo-card-header">
+    <div class="ipo-card-header-middle">
+      <h3 class="ipo-card-name" title="Veritas Finance Limited IPO">Veritas Finance</h3>
+      <div class="ipo-card-date">
+        <time datetime="2050-01-01">TBA</time> – <time datetime="2050-01-01">TBA</time>
+      </div>
+    </div>
+    <div class="ipo-card-header-right">
+      <span class="ipo-card-market-badge" data-ipotype="BSE, NSE">BSE, NSE</span>
+    </div>
+  </header>
+  <div class="card-body"><div class="ipo-card-body-top-row">
+    <div class="ipo-card-body-stat">
+      <span class="ipo-card-secondary-label">Offer Price</span>
+      <span class="ipo-card-body-value">₹N/A</span>
+    </div>
+    <div class="ipo-card-body-stat">
+      <span class="ipo-card-secondary-label">Lot Size</span>
+      <span class="ipo-card-body-value">N/A</span>
+    </div>
+    <div class="ipo-card-body-stat">
+      <span class="ipo-card-secondary-label">Issue Size</span>
+      <span class="ipo-card-body-value ipo-card-issue-size">₹3,500–4,500 Cr Approx</span>
+    </div>
+  </div></div>
+</article>
+
+<article class="card ipo-card ipo-card-new mb-0 "
   data-agent-href="/ipo/jio-platforms-ipo"
   data-ipo-status="upcoming"
   data-ipo-board="mainboard">
