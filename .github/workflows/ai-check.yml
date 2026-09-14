@@ -44,15 +44,14 @@ jobs:
         run: npx tsx scripts/ai-key-report.ts --keyless | tee report.md
 
       - name: Dry check a real key, when the repository has one
-        if: ${{ secrets.AI_KEY != '' }}
         env:
           AI_KEY: ${{ secrets.AI_KEY }}
         run: |
-          {
-            echo '';
-            echo '## With the repository AI_KEY';
-            echo '';
-          } >> report.md
+          if [ -z "${AI_KEY:-}" ]; then
+            printf '\nNo AI_KEY secret is configured, so only the keyless reachability check ran.\n' >> report.md
+            exit 0
+          fi
+          printf '\n## With the repository AI_KEY\n\n' >> report.md
           npx tsx scripts/ai-key-report.ts --strict | tail -n +4 >> report.md
 
       - name: Publish the report
