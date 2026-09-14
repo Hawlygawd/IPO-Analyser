@@ -16,7 +16,15 @@ import { SOURCE_LABELS, type LiveSourceStatus } from '../live/merge';
 import type { LiveAiRow } from '../live/parse';
 import { boardPrompt, extractRows, picksForSearch } from './extract';
 import { chat, listModels, type AiHttpOptions } from './client';
-import { candidatesForKey, pickModel, providerSpec, type AiProviderId, type AiProviderSpec } from './providers';
+import {
+  candidatesForKey,
+  pickModel,
+  providerSpec,
+  searchCapability,
+  searchModelFor,
+  type AiProviderId,
+  type AiProviderSpec,
+} from './providers';
 
 export interface AiSearchOptions extends AiHttpOptions {
   key: string;
@@ -92,8 +100,39 @@ export async function aiBoardSearch(bundled: IPO[], options: AiSearchOptions): P
 
   for (const spec of specs) {
     const baseUrl = (options.baseUrl ?? '').trim() || spec.baseUrl;
-    const wanted = options.search !== false && spec.search !== 'none';
+    const wantsSearch = options.search !== false;
+    let wanted = wantsSearch && spec.search !== 'none';
     let model = (options.model ?? '').trim() || spec.modelFallback;
+    /** a model that searches inside the provider, picked because the provider has no search knob */
+    let rescued: string | undefined;
+
+    /**
+     * A model with no web access answers from its training data, and a grey market premium
+     * invented from training data is worse than no figure at all - the app says so and fills
+     * nothing. The one reprieve: some providers ship a model that searches by itself (Groq's
+     * compound), so look for one on the key's own model list before refusing.
+     */
+    if (wantsSearch && !wanted) {
+      const listed = spec.listsModels ? await listModels({ spec, baseUrl }, key, options) : { ok: false, models: [] as string[] };
+      const hinted = listed.ok ? searchModelFor(listed.models, spec) : undefined;
+      if (!hinted) {
+        const refusal: AiSearchResult = {
+          ...baseResult(spec, model, false, started),
+          error: `${spec.label} cannot search the web (${searchCapability(spec)})`,
+          hint: 'add a key that can search - Google Gemini, xAI, Perplexity, OpenRouter - or the board figures stay as they are',
+          reasons: [
+            `${spec.label} was not asked: ${searchCapability(spec)}`,
+            'live figures are only filled by a search that can actually see the web',
+          ],
+        };
+        last = refusal;
+        if (pinned) return refusal;
+        continue;
+      }
+      model = hinted;
+      rescued = hinted;
+      wanted = true;
+    }
 
     let reply = await chat({ spec, baseUrl, model }, key, prompt, { ...options, search: wanted });
     let servedByFallback = false;
@@ -102,7 +141,7 @@ export async function aiBoardSearch(bundled: IPO[], options: AiSearchOptions): P
     // once with the best of those instead of giving up on the key.
     if (!reply.ok && spec.listsModels && (reply.status === 400 || reply.status === 404)) {
       const listed = await listModels({ spec, baseUrl }, key, options);
-      const discovered = listed.ok ? pickModel(listed.models, spec) : '';
+      const discovered = listed.ok ? rescued ?? pickModel(listed.models, spec) : '';
       if (discovered && discovered !== model) {
         model = discovered;
         servedByFallback = true;
@@ -110,7 +149,7 @@ export async function aiBoardSearch(bundled: IPO[], options: AiSearchOptions): P
       }
     }
 
-    const attempt = baseResult(spec, model, reply.search, started);
+    const attempt = baseResult(spec, model, reply.search || Boolean(rescued), started);
     if (!reply.ok) {
       last = {
         ...attempt,
@@ -143,7 +182,11 @@ export async function aiBoardSearch(bundled: IPO[], options: AiSearchOptions): P
       asOf: newestStamp(extracted.rows),
       latencyMs: Date.now() - started,
       raw: reply.text.slice(0, 600),
-      hint: servedByFallback ? `answered with ${model} after the default model was refused` : attempt.hint,
+      hint: rescued
+        ? `answered with ${rescued}, which searches for itself`
+        : servedByFallback
+          ? `answered with ${model} after the default model was refused`
+          : attempt.hint,
     };
   }
 
@@ -158,7 +201,9 @@ export async function aiBoardSearch(bundled: IPO[], options: AiSearchOptions): P
 /** One line for the source list in Settings: who answered, and how it went. */
 export function aiSourceStatus(result: AiSearchResult): LiveSourceStatus {
   const note = result.ok
-    ? `${result.providerLabel} • ${result.model}${result.search ? ' • web search' : ''}`
+    ? `${result.providerLabel} • ${result.model}${
+        result.search ? ' • web search' : ' • answered from the model\'s memory'
+      }`
     : result.error;
   return {
     key: 'ai',

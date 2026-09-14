@@ -168,6 +168,14 @@ Model names rot faster than app releases, so nothing is hard-coded: the model li
 model name is swapped for one the key can actually reach, and a provider that does not support web
 search or a search request is retried without it rather than failing.
 
+A key that cannot search the web is never asked to guess live figures. Most providers have one
+search knob or another (Gemini's Google grounding, xAI's live search, Anthropic's `web_search`
+tool, OpenRouter's `:online` models, Perplexity's sonar models); Groq has none, but it does ship
+its own agentic `compound` models, so the app looks for one of those on the key's own model list.
+If neither exists, the refresh says exactly that - *"Groq cannot search the web"* - fills nothing,
+and the board figures stay as they are. That is why the dry run reports *"answered from the
+model's memory"* rather than showing invented premiums.
+
 Honesty is enforced rather than promised:
 
 - The last pull is shown with two clocks: **when the app checked** the boards, and the **newest
@@ -204,7 +212,7 @@ Quality gates:
 ```bash
 npm run check:deps   # native dependencies must match the versions Expo SDK 57 ships
 npm run typecheck    # strict TS, app config + node config for scripts/tests
-npm test             # 92 unit tests (tsx --test): data integrity, formatting, analysis, board,
+npm test             # 94 unit tests (tsx --test): data integrity, formatting, analysis, board,
                      # reminders, live parsing + merge, and the AI key layer against fake providers
 npm run board        # prints the board as the app sees it (npm run board -- gmp for the ranking)
 npm run build:web    # static web export into dist/

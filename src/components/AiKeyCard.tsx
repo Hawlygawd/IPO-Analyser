@@ -12,7 +12,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { radius, Theme } from '../theme';
 import { Button, KeyValueRow, SectionCard } from './ui';
 import { useAi } from '../lib/ai/settings';
-import { AI_PROVIDERS, type AiProviderId } from '../lib/ai/providers';
+import { AI_PROVIDERS, searchCapability, type AiProviderId } from '../lib/ai/providers';
 import { useStore } from '../lib/store';
 
 /** The providers worth a one-tap pick; "Other" covers everything OpenAI-compatible. */
@@ -236,6 +236,12 @@ export function AiKeyCard({ theme }: { theme: Theme }) {
           <Text style={{ fontSize: 13.5, fontWeight: '700', color: theme.text }}>Use during refresh</Text>
           <Text style={{ fontSize: 11.5, color: theme.textMuted, marginTop: 2, lineHeight: 16 }}>
             Spends one search request per refresh, and only when the boards come back empty or fail.
+            {' '}
+            {ai.providerId
+              ? `This key is ${provider?.label ?? ai.providerId}, which ${searchCapability(
+                  AI_PROVIDERS.find((spec) => spec.id === ai.providerId) ?? AI_PROVIDERS[0]
+                )}.`
+              : 'A key that cannot search the web is never asked to guess live figures.'}
           </Text>
         </View>
         <Switch

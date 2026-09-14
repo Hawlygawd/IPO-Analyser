@@ -366,6 +366,41 @@ test('a rotted default model is replaced by one the key can reach', async () => 
   assert.equal(calls.length, 3, 'refused model, then the model list, then the retry');
 });
 
+test('a provider that cannot search is never asked to guess live figures', async () => {
+  // the key the user actually has: Groq, whose llama models have no web access
+  const key = 'gsk_abcdefghijklmnopqrst';
+  const { fetcher, calls } = fakeFetch([
+    { match: /api\.groq\.com\/openai\/v1\/models/, json: { data: [{ id: 'llama-3.3-70b-versatile' }, { id: 'openai/gpt-oss-20b' }] } },
+    { match: /chat\/completions$/, json: { choices: [{ message: { content: JSON.stringify([aiRow()]) } }] } },
+  ]);
+
+  const result = await aiBoardSearch(IPOT, { key, providerId: 'groq', fetcher });
+  assert.equal(result.ok, false);
+  assert.equal(result.rows.length, 0, 'rows invented from training data must not be usable');
+  assert.match(result.error ?? '', /cannot search the web/);
+  assert.match(result.hint ?? '', /Gemini|Perplexity|OpenRouter/);
+  assert.equal(calls.length, 1, 'only the model list was called - no chat request');
+});
+
+test('a provider whose own model searches is used through that model', async () => {
+  const key = 'gsk_abcdefghijklmnopqrst';
+  const { fetcher, calls } = fakeFetch([
+    {
+      match: /api\.groq\.com\/openai\/v1\/models/,
+      json: { data: [{ id: 'llama-3.3-70b-versatile' }, { id: 'groq/compound-mini' }, { id: 'groq/compound' }] },
+    },
+    { match: /chat\/completions$/, json: { choices: [{ message: { content: JSON.stringify([aiRow()]) } }] } },
+  ]);
+
+  const result = await aiBoardSearch(IPOT, { key, providerId: 'groq', fetcher, now: new Date('2026-09-14T12:05:00Z') });
+  assert.equal(result.ok, true);
+  assert.equal(result.model, 'groq/compound', 'the search-capable model was not chosen');
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.search, true, 'a searching model must be reported as a web search');
+  assert.match(result.hint ?? '', /searches for itself/);
+  assert.equal(calls.length, 2, 'model list, then one chat request');
+});
+
 /* ------------------------------------------------------------------ merge */
 
 test('AI rows fill gaps but never outrank a published board', () => {

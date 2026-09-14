@@ -62,6 +62,12 @@ export interface AiProviderSpec {
   /** True when a max token cap must be sent (Anthropic), false when it only causes 400s. */
   tokenCap: 'max_tokens' | 'max_completion_tokens' | 'none';
   search: AiSearchMode;
+  /**
+   * Models that search the web by themselves, even though the provider has no search knob
+   * (Groq's `compound` answers with live web results). Checked before the app refuses to use a
+   * provider for figures: a model that cannot search must not be asked to guess them.
+   */
+  searchModelHints?: string[];
   /** Sent with every request (OpenRouter's attribution headers, for instance). */
   extraHeaders?: Record<string, string>;
   /** Providers whose API cannot be called from a browser at all. */
@@ -144,6 +150,9 @@ export const AI_PROVIDERS: AiProviderSpec[] = [
     modelFallback: 'llama-3.3-70b-versatile',
     tokenCap: 'max_tokens',
     search: 'none',
+    // Groq's own agentic models run web search internally, which is the only way a Groq key can
+    // answer with live figures at all
+    searchModelHints: ['compound'],
   },
   {
     id: 'openrouter',
@@ -382,4 +391,46 @@ export function selectableModels(models: string[]): string[] {
     .map((model) => model.replace(/^models\//, ''))
     .filter((model) => !EXCLUDED_MODEL.test(model))
     .slice(0, 60);
+}
+
+/**
+ * A model id on this provider's list that searches the web by itself, if any.
+ * Checked before the app gives up on a provider that has no search parameter.
+ */
+export function searchModelFor(models: string[], spec: AiProviderSpec): string | undefined {
+  const hints = spec.searchModelHints ?? [];
+  if (hints.length === 0) return undefined;
+  const usable = models.filter((id) => !/embed|whisper|tts|guard|moderation/i.test(id));
+  for (const hint of hints) {
+    const matches = usable.filter((id) => id.toLowerCase().includes(hint.toLowerCase()));
+    // "groq/compound-mini" and "groq/compound" both match: prefer the shorter id, which is the
+    // full model rather than a cut-down one
+    if (matches.length) return matches.sort((a, b) => a.length - b.length)[0];
+  }
+  return undefined;
+}
+
+/** Can this provider's key answer with live figures at all, and how? */
+export function canSearchWeb(spec: AiProviderSpec): boolean {
+  return spec.search !== 'none' || (spec.searchModelHints?.length ?? 0) > 0;
+}
+
+/** One line, for the key card, saying what this provider can do about live data. */
+export function searchCapability(spec: AiProviderSpec): string {
+  switch (spec.search) {
+    case 'google-grounding':
+      return 'searches Google for live results';
+    case 'x-live-search':
+      return 'searches X posts live';
+    case 'anthropic-tool':
+      return 'runs its own web_search tool';
+    case 'online-suffix':
+      return 'searches the web through :online models';
+    case 'built-in':
+      return 'has search built into its models';
+    default:
+      return spec.searchModelHints?.length
+        ? `cannot search by itself - only through a search-capable model (${spec.searchModelHints.join(', ')})`
+        : 'cannot search the web, so it is never asked to guess live figures';
+  }
 }
