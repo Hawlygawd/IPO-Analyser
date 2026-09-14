@@ -42,25 +42,28 @@ jobs:
           const cap = (text, n) => (text.length > n ? `${text.slice(0, n)}\n…[+${text.length - n} chars]` : text);
           const out = [];
 
-          // the calendar renders events in the browser, so look for the endpoint it calls
-          for (const file of ['calendar.html', 'subscription.html', 'gmp.html']) {
-            const html = read(file);
-            out.push(`\n\n========== ${file} (${html.length} bytes) ==========`);
-            for (const [label, pattern] of [
-              ['fetch(', /fetch\([^)]{0,200}/g],
-              ['ajax/url', /(?:\$\.(?:get|post|ajax)|axios|XMLHttpRequest|url\s*:)[\s\S]{0,200}/gi],
-              ['endpoint-ish', /["'`][^"'`\s]{0,80}?\/(?:api|data|json|events?|calendar)[^"'`\s]{0,80}?["'`]/gi],
-              ['json content type', /application\/json[\s\S]{0,160}/gi],
-            ]) {
-              const hits = [...html.matchAll(pattern)].map((m) => m[0].replace(/\s+/g, ' ').trim());
-              out.push(`\n--- ${label}: ${hits.length} hit(s)`);
-              [...new Set(hits)].slice(0, 10).forEach((h) => out.push('  ' + cap(h, 220)));
-            }
-            const inline = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
-            const interesting = inline.filter((b) => /calend|event|gmp|subscri/i.test(b) && b.length > 300);
-            out.push(`\n--- inline scripts mentioning the data: ${inline.length} inline, ${interesting.length} interesting`);
-            interesting.slice(0, 2).forEach((b, i) => out.push(`\n### inline script ${i} (${b.length} chars)\n${cap(b.trim(), 2500)}`));
-          }
+          // ---- calendar: cards whose class attribute is not on the same line as the tag name
+          const cal = read('calendar.html');
+          const opens = [...cal.matchAll(/<(?:div|article|li|section)\b[^>]*\bclass="[^"]*\bevent-card\b[^"]*"[^>]*>/g)];
+          out.push(`# calendar: ${opens.length} event-card element(s), page ${cal.length} bytes`);
+          opens.slice(0, 2).forEach((m, i) => {
+            const from = m.index;
+            const next = opens[i + 1]?.index ?? from + 2500;
+            out.push(`\n## card ${i} (open tag at ${from})\n` + cap(`${m[0]}\n${cal.slice(from + m[0].length, next)}`, 2400));
+          });
+          const headers = [...cal.matchAll(/<div\b[^>]*\bclass="[^"]*\bevent-date\b[^"]*"[^>]*>[\s\S]{0,500}?<\/div>\s*<\/div>/g)];
+          out.push(`\n\n# event-date headers: ${headers.length}`);
+          headers.slice(0, 3).forEach((h, i) => out.push(`\n## header ${i}\n${cap(h[0].replace(/\s+/g, ' '), 700)}`));
+          const nameTexts = [...cal.matchAll(/<[^>]*\bclass="[^"]*\bevent-name\b[^"]*"[^>]*>([\s\S]{0,80}?)</g)].map((m) => m[1].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim());
+          out.push(`\n# event-name texts (first 12): ${JSON.stringify(nameTexts.slice(0, 12))}`);
+          const tpl = cal.indexOf('${ev.name');
+          out.push(`\n# template mention at ${tpl}; surrounding context:\n${cap(cal.slice(Math.max(0, tpl - 1500), tpl + 900).replace(/\s+/g, ' '), 2400)}`);
+
+          // ---- gmp: is there an embedded JSON copy of the table?
+          const gmp = read('gmp.html');
+          const jsonish = [...gmp.matchAll(/(?:const|let|var)\s+\w+\s*=\s*\[[\s\S]{0,400}/g)].map((m) => m[0].replace(/\s+/g, ' '));
+          out.push(`\n\n# gmp page: ${(gmp.match(/data-name="/g) ?? []).length} data-name attributes, ${jsonish.length} inline JSON-ish arrays`);
+          jsonish.slice(0, 3).forEach((j) => out.push('  ' + cap(j, 300)));
 
           console.log(out.join('\n'));
           NODE
