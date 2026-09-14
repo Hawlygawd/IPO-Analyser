@@ -1,17 +1,22 @@
 {
   "expo": {
-    "name": "Agon Preview",
-    "slug": "agon-preview",
-    "version": "1.0.0",
+    "name": "IPO Pulse",
+    "slug": "ipo-pulse",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "scheme": "ipopulse",
+    "userInterfaceStyle": "automatic",
+    "description": "Track the Indian IPO board: grey market premium, category-wise subscription, key dates and plain-language analysis with reminders.",
+    "primaryColor": "#0B7A54",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ipopulse.app"
     },
     "android": {
+      "package": "com.ipopulse.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0B7A54",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -19,32 +24,24 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "name": "IPO Pulse",
+      "shortName": "IPO Pulse",
+      "themeColor": "#0B7A54",
+      "backgroundColor": "#F4F6F9",
+      "bundler": "metro"
     },
     "plugins": [
       [
         "expo-notifications",
         {
-          "color": "#00A870"
+          "color": "#0B7A54"
         }
       ]
     ],
-    "extra": {
-      "eas": {
-        "projectId": "552f0665-e30d-4f11-9ea9-97bc22a22809"
-      }
-    },
-    "updates": {
-      "url": "https://u.expo.dev/552f0665-e30d-4f11-9ea9-97bc22a22809"
-    },
     "runtimeVersion": {
       "policy": "appVersion"
     },
-    "owner": "arcadalabs",
-    "platforms": [
-      "ios",
-      "android",
-      "web"
-    ]
+    "platforms": ["ios", "android", "web"]
   }
 }

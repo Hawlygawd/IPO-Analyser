@@ -1,8 +1,8 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme } from '../theme';
+import { IconButton } from './ui';
 
 export function ScreenHeader({
   theme,
@@ -11,6 +11,7 @@ export function ScreenHeader({
   onBack,
   right,
   large,
+  backLabel = 'Go back',
 }: {
   theme: Theme;
   title: string;
@@ -18,6 +19,7 @@ export function ScreenHeader({
   onBack?: () => void;
   right?: React.ReactNode;
   large?: boolean;
+  backLabel?: string;
 }) {
   const insets = useSafeAreaInsets();
   return (
@@ -33,34 +35,31 @@ export function ScreenHeader({
       ]}
     >
       {onBack ? (
-        <Pressable
+        <IconButton
+          icon="arrow-back"
           onPress={onBack}
-          hitSlop={12}
-          style={({ pressed }) => [
-            styles.iconBtn,
-            { backgroundColor: theme.card, borderColor: theme.border },
-            pressed && { opacity: 0.7 },
-          ]}
-        >
-          <Ionicons name="arrow-back" size={19} color={theme.text} />
-        </Pressable>
+          theme={theme}
+          accessibilityLabel={backLabel}
+          size={38}
+        />
       ) : null}
-      <View style={{ flex: 1 }}>
+
+      <View style={{ flex: 1, minWidth: 0 }}>
         <Text
+          accessibilityRole="header"
           numberOfLines={1}
-          style={[
-            large ? styles.titleLarge : styles.title,
-            { color: theme.text },
-          ]}
+          ellipsizeMode="tail"
+          style={[large ? styles.titleLarge : styles.title, { color: theme.text }]}
         >
           {title}
         </Text>
         {subtitle ? (
-          <Text numberOfLines={1} style={[styles.subtitle, { color: theme.textMuted }]}>
+          <Text numberOfLines={2} style={[styles.subtitle, { color: theme.textMuted }]}>
             {subtitle}
           </Text>
         ) : null}
       </View>
+
       {right}
     </View>
   );
@@ -74,15 +73,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   title: { fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
   titleLarge: { fontSize: 27, fontWeight: '800', letterSpacing: -0.6 },
-  subtitle: { fontSize: 11.5, fontWeight: '600', marginTop: 2 },
+  subtitle: { fontSize: 11.5, fontWeight: '600', marginTop: 3, lineHeight: 16 },
 });

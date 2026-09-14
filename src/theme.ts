@@ -27,6 +27,10 @@ export interface Theme {
   shadow: string;
 }
 
+/**
+ * Light palette. Every foreground colour below was picked to clear WCAG AA (4.5:1) on
+ * both the card and its own soft tint - gains, losses and labels are readable at 11-13px.
+ */
 export const lightTheme: Theme = {
   mode: 'light',
   bg: '#F4F6F9',
@@ -34,20 +38,20 @@ export const lightTheme: Theme = {
   cardAlt: '#F7F9FC',
   text: '#12161C',
   textSub: '#5A6472',
-  textMuted: '#8A94A3',
-  border: '#E6EAF0',
-  primary: '#00A870',
+  textMuted: '#67707F',
+  border: '#DCE2EA',
+  primary: '#0B7A54',
   primarySoft: '#E3F7EF',
   onPrimary: '#FFFFFF',
-  up: '#0E9F6E',
+  up: '#0B7A54',
   upSoft: '#E3F7EF',
-  down: '#E02424',
+  down: '#C81E1E',
   downSoft: '#FDE7E7',
   warn: '#B45309',
   warnSoft: '#FEF3E2',
-  info: '#2563EB',
+  info: '#1D4ED8',
   infoSoft: '#E6EEFE',
-  neutral: '#6B7280',
+  neutral: '#4B5563',
   neutralSoft: '#EEF1F5',
   shadow: '#0B1B33',
 };
@@ -58,8 +62,8 @@ export const darkTheme: Theme = {
   card: '#161B23',
   cardAlt: '#1D232D',
   text: '#F1F4F8',
-  textSub: '#A7B0BE',
-  textMuted: '#7C8798',
+  textSub: '#B7C0CD',
+  textMuted: '#8B96A8',
   border: '#242B36',
   primary: '#12C98C',
   primarySoft: '#0E2A22',
@@ -109,7 +113,7 @@ export function cardShadow(mode: 'light' | 'dark') {
 
 export const AVATAR_COLORS = [
   '#0B5FFF',
-  '#00A870',
+  '#0B7A54',
   '#7C3AED',
   '#DB2777',
   '#EA580C',

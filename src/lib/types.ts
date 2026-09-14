@@ -1,5 +1,10 @@
 export type Segment = 'Mainboard' | 'SME';
 
+/** Exchange platform the issue is bidding on. */
+export type Platform = 'NSE' | 'BSE' | 'NSE SME' | 'BSE SME';
+
+export type MilestoneKey = 'open' | 'close' | 'allotment' | 'listing';
+
 export type IpoPhase = 'upcoming' | 'open' | 'allotment' | 'listed';
 
 export interface SubscriptionSplit {
@@ -13,15 +18,17 @@ export interface SubscriptionSplit {
 export interface IPO {
   id: string;
   name: string;
-  sector: string;
+  /** Broad industry label - omitted when it is not confirmed by a source. */
+  sector?: string;
   segment: Segment;
+  platform: Platform;
   /** ISO date (YYYY-MM-DD) */
   openDate: string;
   closeDate: string;
   allotmentDate: string;
   listingDate: string;
   /** dates that are provisional / not yet confirmed by the exchange */
-  tentativeDates: string[];
+  tentativeDates: MilestoneKey[];
   priceBandLow?: number;
   priceBandHigh?: number;
   lotSize?: number;
@@ -30,11 +37,15 @@ export interface IPO {
   exchanges: string[];
   /** grey market premium in ₹ over the upper price band */
   gmp?: number;
+  /** ISO timestamp of the last recorded GMP quote */
+  gmpUpdated?: string;
   subscription?: SubscriptionSplit;
   about: string;
   sourceName: string;
   sourceUrl: string;
 }
+
+export type AlertKind = 'watch' | 'unwatch' | 'scheduled' | 'system';
 
 export interface AlertLogItem {
   id: string;
@@ -43,7 +54,7 @@ export interface AlertLogItem {
   title: string;
   body: string;
   at: number;
-  kind: 'watch' | 'unwatch' | 'scheduled' | 'system';
+  kind: AlertKind;
 }
 
 export interface NotifPrefs {

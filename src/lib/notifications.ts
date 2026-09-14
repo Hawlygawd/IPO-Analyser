@@ -1,21 +1,42 @@
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import type * as NotificationsModule from 'expo-notifications';
 import { IPO, NotifPrefs } from './types';
-import { parseISO, addDays, startOfToday } from './format';
+import { buildReminders, Reminder } from './reminders';
+
+declare const require: (name: string) => unknown;
 
 let handlerInstalled = false;
 let channelInstalled = false;
+let notificationsLib: typeof NotificationsModule | null = null;
+
+/**
+ * expo-notifications is only useful on iOS and Android. Loading it lazily keeps its web
+ * shim (and the "push tokens are not supported on web" warning) out of the web build.
+ */
+function notifications(): typeof NotificationsModule | null {
+  if (!notificationsSupported()) return null;
+  if (!notificationsLib) {
+    try {
+      notificationsLib = require('expo-notifications') as typeof NotificationsModule;
+    } catch {
+      return null;
+    }
+  }
+  return notificationsLib;
+}
 
 /** Android needs an explicit notification channel (best-effort). */
 export function setupNotificationChannel(): void {
   if (Platform.OS !== 'android' || channelInstalled) return;
+  const lib = notifications();
+  if (!lib) return;
   channelInstalled = true;
   try {
-    Notifications.setNotificationChannelAsync('reminders', {
+    lib.setNotificationChannelAsync('reminders', {
       name: 'IPO reminders',
-      importance: Notifications.AndroidImportance.HIGH,
+      importance: lib.AndroidImportance.HIGH,
       vibrationPattern: [0, 200, 120, 200],
-      lightColor: '#00A870',
+      lightColor: '#0B7A54',
     }).catch(() => undefined);
   } catch {
     // web / unsupported - ignore
@@ -24,9 +45,11 @@ export function setupNotificationChannel(): void {
 
 function installHandler() {
   if (handlerInstalled) return;
+  const lib = notifications();
+  if (!lib) return;
   handlerInstalled = true;
   try {
-    Notifications.setNotificationHandler({
+    lib.setNotificationHandler({
       handleNotification: async () => ({
         shouldShowBanner: true,
         shouldShowList: true,
@@ -39,17 +62,19 @@ function installHandler() {
   }
 }
 
+/** expo-notifications is not available on web - reminders are logged in-app instead. */
 export function notificationsSupported(): boolean {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
 
 export async function getPermissionState(): Promise<'granted' | 'denied' | 'undetermined'> {
-  if (!notificationsSupported()) return 'undetermined';
+  const lib = notifications();
+  if (!lib) return 'undetermined';
   try {
     installHandler();
-    const settings = await Notifications.getPermissionsAsync();
+    const settings = await lib.getPermissionsAsync();
     if (settings.granted) return 'granted';
-    if (settings.status === Notifications.PermissionStatus.UNDETERMINED) return 'undetermined';
+    if (settings.status === lib.PermissionStatus.UNDETERMINED) return 'undetermined';
     return 'denied';
   } catch {
     return 'undetermined';
@@ -57,143 +82,85 @@ export async function getPermissionState(): Promise<'granted' | 'denied' | 'unde
 }
 
 export async function requestPermission(): Promise<boolean> {
-  if (!notificationsSupported()) return false;
+  const lib = notifications();
+  if (!lib) return false;
   try {
     installHandler();
-    const current = await Notifications.getPermissionsAsync();
+    const current = await lib.getPermissionsAsync();
     if (current.granted) return true;
-    const asked = await Notifications.requestPermissionsAsync();
+    const asked = await lib.requestPermissionsAsync();
     return !!asked.granted;
   } catch {
     return false;
   }
 }
 
-function atHour(iso: string, hour: number, minute = 30): Date {
-  const d = parseISO(iso);
-  d.setHours(hour, minute, 0, 0);
-  return d;
+export async function cancelIds(ids: string[]): Promise<void> {
+  const lib = notifications();
+  if (!lib || ids.length === 0) return;
+  try {
+    await Promise.all(ids.map((id) => lib.cancelScheduledNotificationAsync(id).catch(() => undefined)));
+  } catch {
+    // no-op
+  }
 }
 
-function isFuture(date: Date): boolean {
-  return date.getTime() > Date.now() + 5 * 60 * 1000;
-}
+/**
+ * Schedules the reminders for one IPO and returns the notification ids.
+ * The plan itself is always returned, even when nothing could be scheduled, so the UI can
+ * still describe what would fire.
+ */
+export async function scheduleForIpo(
+  ipo: IPO,
+  prefs: NotifPrefs
+): Promise<{ ids: string[]; plans: Reminder[] }> {
+  const plans = buildReminders(ipo, prefs);
+  const lib = notifications();
+  if (!lib) return { ids: [], plans };
 
-interface ScheduledPlan {
-  id: string;
-  title: string;
-  body: string;
-  date: Date;
-}
-
-/** Builds the reminder set for a watched IPO based on the user's preferences. */
-export function planForIpo(ipo: IPO, prefs: NotifPrefs): ScheduledPlan[] {
-  const plans: ScheduledPlan[] = [];
-  const today = startOfToday();
-
-  if (prefs.openDay) {
-    const openAt = atHour(ipo.openDate, 8, 45);
-    if (isFuture(openAt)) {
-      plans.push({
-        id: `${ipo.id}-open`,
-        title: `${ipo.name} opens today`,
-        body: `Bidding starts now \u2022 price band ${
-          ipo.priceBandHigh ? `\u20B9${ipo.priceBandLow}\u2013\u20B9${ipo.priceBandHigh}` : 'to be announced'
-        }.`,
-        date: openAt,
-      });
-    }
-    const eveAt = new Date(atHour(ipo.openDate, 18, 0).getTime());
-    eveAt.setDate(eveAt.getDate() - 1);
-    if (isFuture(eveAt) && eveAt.getTime() > today.getTime()) {
-      plans.push({
-        id: `${ipo.id}-open-eve`,
-        title: `${ipo.name} opens tomorrow`,
-        body: 'Keep your UPI mandate ready to apply.',
-        date: eveAt,
-      });
-    }
-  }
-
-  if (prefs.lastDay) {
-    const lastAt = atHour(ipo.closeDate, 9, 15);
-    if (isFuture(lastAt)) {
-      plans.push({
-        id: `${ipo.id}-close`,
-        title: `Last day to apply \u2013 ${ipo.name}`,
-        body: `Bidding closes at 5 PM on ${parseISO(ipo.closeDate).toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-        })}.`,
-        date: lastAt,
-      });
-    }
-  }
-
-  if (prefs.allotment) {
-    const allotAt = atHour(ipo.allotmentDate, 11, 0);
-    if (isFuture(allotAt)) {
-      plans.push({
-        id: `${ipo.id}-allot`,
-        title: `${ipo.name}: allotment day`,
-        body: 'Basis of allotment is expected to be finalised today. Check your ASBA account.',
-        date: allotAt,
-      });
-    }
-  }
-
-  if (prefs.listing) {
-    const listAt = atHour(ipo.listingDate, 9, 15);
-    if (isFuture(listAt)) {
-      plans.push({
-        id: `${ipo.id}-list`,
-        title: `${ipo.name} lists today`,
-        body: `Shares are expected to debut on ${ipo.exchanges.join(' & ')}.`,
-        date: listAt,
-      });
-    }
-  }
-
-  return plans.slice(0, 6);
-}
-
-/** Schedules local notifications and returns their ids (empty on web). */
-export async function scheduleForIpo(ipo: IPO, prefs: NotifPrefs): Promise<string[]> {
-  if (!notificationsSupported()) return [];
   const granted = await getPermissionState();
-  if (granted !== 'granted') return [];
+  if (granted !== 'granted') return { ids: [], plans };
   installHandler();
-  const plans = planForIpo(ipo, prefs);
+
   const ids: string[] = [];
   for (const plan of plans) {
     try {
-      const id = await Notifications.scheduleNotificationAsync({
+      const id = await lib.scheduleNotificationAsync({
         identifier: plan.id,
-        content: { title: plan.title, body: plan.body, data: { ipoId: ipo.id } },
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: plan.date },
+        content: {
+          title: plan.title,
+          body: plan.body,
+          data: { ipoId: ipo.id, milestone: plan.milestone },
+        },
+        trigger: { type: lib.SchedulableTriggerInputTypes.DATE, date: plan.date },
       });
       ids.push(id);
     } catch {
       // ignore individual failures (e.g. platform not ready)
     }
   }
-  return ids;
+  return { ids, plans };
 }
 
-export async function cancelIds(ids: string[]): Promise<void> {
-  if (!notificationsSupported() || ids.length === 0) return;
+/** Subscribes to delivered notifications so the in-app log stays in sync. */
+export function subscribeToDelivered(
+  onDelivered: (payload: { ipoId?: string; title: string; body: string }) => void
+): () => void {
+  const lib = notifications();
+  if (!lib) return () => undefined;
   try {
-    await Promise.all(ids.map((id) => Notifications.cancelScheduledNotificationAsync(id).catch(() => undefined)));
+    const subscription = lib.addNotificationReceivedListener((notification) => {
+      onDelivered({
+        ipoId: (notification.request.content.data?.ipoId as string) ?? '-',
+        title: notification.request.content.title ?? 'IPO reminder',
+        body: notification.request.content.body ?? '',
+      });
+    });
+    return () => subscription.remove();
   } catch {
-    // no-op
+    return () => undefined;
   }
 }
 
-export async function cancelAll(): Promise<void> {
-  if (!notificationsSupported()) return;
-  try {
-    await Notifications.cancelAllScheduledNotificationsAsync();
-  } catch {
-    // no-op
-  }
-}
+export { buildReminders, reminderPlanFor, watchlistPlan } from './reminders';
+export type { Reminder } from './reminders';

@@ -1,6 +1,8 @@
 {
-  "buildCommand": null,
+  "buildCommand": "npm run build:web",
+  "installCommand": "npm ci",
   "outputDirectory": "dist",
+  "framework": null,
   "rewrites": [
     {
       "source": "/((?!_expo|assets|.*\\..*).*)",

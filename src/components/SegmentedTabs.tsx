@@ -1,6 +1,5 @@
-import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, LayoutChangeEvent, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { radius, Theme } from '../theme';
 
 export interface SegmentOption<T extends string> {
@@ -9,43 +8,81 @@ export interface SegmentOption<T extends string> {
   count?: number;
 }
 
+const PAD = 4;
+const GAP = 4;
+const USE_NATIVE_DRIVER = Platform.OS !== 'web';
+
+/**
+ * Pill segmented control with a sliding indicator. The indicator is positioned in pixels
+ * (measured with onLayout) so it animates reliably on native and on web.
+ */
 export function SegmentedTabs<T extends string>({
   options,
   value,
   onChange,
   theme,
+  accessibilityLabel,
 }: {
   options: SegmentOption<T>[];
   value: T;
   onChange: (key: T) => void;
   theme: Theme;
+  accessibilityLabel?: string;
 }) {
+  const [width, setWidth] = useState(0);
+  const index = Math.max(0, options.findIndex((o) => o.key === value));
+  const translateX = useRef(new Animated.Value(0)).current;
+  const segment = width > 0 ? (width - PAD * 2 - GAP * (options.length - 1)) / options.length : 0;
+
+  useEffect(() => {
+    Animated.spring(translateX, {
+      toValue: index * (segment + GAP),
+      useNativeDriver: USE_NATIVE_DRIVER,
+      damping: 20,
+      stiffness: 220,
+      mass: 0.7,
+    }).start();
+  }, [index, segment, translateX]);
+
+  const onLayout = (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width);
+
   return (
-    <View style={[styles.wrap, { backgroundColor: theme.mode === 'dark' ? theme.cardAlt : theme.neutralSoft }]}>
+    <View
+      onLayout={onLayout}
+      accessibilityRole="tablist"
+      accessibilityLabel={accessibilityLabel ?? 'Filter'}
+      style={[styles.wrap, { backgroundColor: theme.mode === 'dark' ? theme.cardAlt : theme.neutralSoft }]}
+    >
+      {segment > 0 ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.indicator,
+            {
+              width: segment,
+              backgroundColor: theme.card,
+              transform: [{ translateX }],
+            },
+          ]}
+        />
+      ) : null}
       {options.map((opt) => {
         const active = opt.key === value;
         return (
           <Pressable
             key={opt.key}
             onPress={() => onChange(opt.key)}
-            style={[styles.seg, active && { backgroundColor: theme.mode === 'dark' ? theme.card : '#FFFFFF' }]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
+            accessibilityLabel={`${opt.label}${opt.count != null ? `, ${opt.count} IPOs` : ''}`}
+            style={styles.seg}
           >
-            {active ? (
-              <Animated.View
-                entering={FadeIn.duration(180)}
-                style={[StyleSheet.absoluteFill, { borderRadius: radius.pill, backgroundColor: theme.card }]}
-              />
-            ) : null}
             <Text
               numberOfLines={1}
-              style={[
-                styles.label,
-                { color: active ? theme.text : theme.textSub },
-                active && { color: theme.text },
-              ]}
+              style={[styles.label, { color: active ? theme.text : theme.textSub }]}
             >
               {opt.label}
-              {opt.count != null ? ` ${opt.count}` : ''}
+              {opt.count != null ? <Text style={{ color: active ? theme.primary : theme.textMuted }}>{`  ${opt.count}`}</Text> : null}
             </Text>
           </Pressable>
         );
@@ -57,17 +94,30 @@ export function SegmentedTabs<T extends string>({
 const styles = StyleSheet.create({
   wrap: {
     flexDirection: 'row',
-    padding: 4,
+    padding: PAD,
     borderRadius: radius.pill,
-    gap: 4,
+    gap: GAP,
+    position: 'relative',
+  },
+  indicator: {
+    position: 'absolute',
+    top: PAD,
+    bottom: PAD,
+    left: PAD,
+    borderRadius: radius.pill,
+    shadowColor: '#0B1B33',
+    shadowOpacity: 0.08,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   seg: {
     flex: 1,
-    paddingVertical: 8.5,
+    paddingVertical: 9,
+    paddingHorizontal: 4,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
   },
-  label: { fontSize: 13, fontWeight: '700' },
+  label: { fontSize: 12.5, fontWeight: '700' },
 });

@@ -1,113 +1,168 @@
-import React, { useMemo, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import { Theme } from '../theme';
+import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { IPOT, DATA_AS_OF_LABEL } from '../lib/ipoData';
+import { IPOT, DATA_AS_OF_LABEL, DATA_SOURCE_LABEL } from '../lib/ipoData';
 import { IPO } from '../lib/types';
-import { diffDays, gmpPercent, parseISO, startOfToday } from '../lib/format';
-import { phaseOf } from '../lib/analysis';
+import { daysUntil, formatIstTime } from '../lib/format';
+import { dataAge } from '../lib/analysis';
+import { BoardTab, SortKey, bucketBoard, boardStats, sortIpos } from '../lib/board';
 import { IPOCard } from '../components/IPOCard';
 import { SegmentedTabs } from '../components/SegmentedTabs';
-import { CardSkeleton } from '../components/ui';
+import { IconButton, Row } from '../components/ui';
+import { SummaryTile } from '../components/Charts';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { RootStackParamList } from '../navigation/types';
 
-type Tab = 'open' | 'upcoming' | 'closed';
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: 'closing', label: 'Closing next' },
+  { key: 'premium', label: 'Top premium' },
+  { key: 'size', label: 'Issue size' },
+  { key: 'name', label: 'A–Z' },
+];
 
 export function HomeScreen({ theme }: { theme: Theme }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { refreshing, refresh, lastRefresh, isWatched, alerts } = useStore();
-  const [tab, setTab] = useState<Tab>('open');
-  const [booted, setBooted] = useState(false);
+  const { refreshing, refresh, lastChecked, isWatched, toggleWatch, alerts, boardVersion } = useStore();
+  const [tab, setTab] = useState<BoardTab>('open');
+  const [sort, setSort] = useState<SortKey>('closing');
 
-  React.useEffect(() => {
-    const t = setTimeout(() => setBooted(true), 550);
-    return () => clearTimeout(t);
-  }, []);
+  const board = useMemo(() => bucketBoard(IPOT), [boardVersion]);
+  const stats = useMemo(() => boardStats(IPOT), [boardVersion]);
+  const age = useMemo(() => dataAge(), [boardVersion]);
 
-  const today = startOfToday();
+  const list: IPO[] = useMemo(() => {
+    const bucket = tab === 'open' ? board.open : tab === 'soon' ? board.soon : board.closed;
+    return sortIpos(bucket, sort);
+  }, [board, tab, sort]);
 
-  const buckets = useMemo(() => {
-    const open: IPO[] = [];
-    const upcoming: IPO[] = [];
-    const closed: IPO[] = [];
-    for (const ipo of IPOT) {
-      const phase = phaseOf(ipo, today);
-      if (phase.key === 'open') open.push(ipo);
-      else if (phase.key === 'upcoming') {
-        const inWindow = diffDays(today, parseISO(ipo.openDate)) <= 6;
-        (inWindow ? open : upcoming).push(ipo);
-      } else closed.push(ipo);
-    }
-    open.sort((a, b) => a.closeDate.localeCompare(b.closeDate));
-    upcoming.sort((a, b) => a.openDate.localeCompare(b.openDate));
-    closed.sort((a, b) => b.listingDate.localeCompare(a.listingDate));
-    return { open, upcoming, closed };
-  }, [today]);
-
-  const literallyOpen = IPOT.filter((i) => phaseOf(i, today).key === 'open');
-  const nextUp = useMemo(
-    () => [...IPOT].sort((a, b) => a.openDate.localeCompare(b.openDate)).find((i) => phaseOf(i, today).key === 'upcoming'),
-    [today]
-  );
-  const strongCount = IPOT.filter((i) => {
-    const pct = gmpPercent(i);
-    return pct != null && pct >= 25;
-  }).length;
-
-  const data = tab === 'open' ? buckets.open : tab === 'upcoming' ? buckets.upcoming : buckets.closed;
-  const updatedTime = new Date(lastRefresh).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
-
-  const SummaryStrip = (
-    <View style={styles.summaryRow}>
-      <SummaryBox theme={theme} icon="radio-button-on" tone="up" label="Live now" value={String(literallyOpen.length)} />
-      <SummaryBox
-        theme={theme}
-        icon="time-outline"
-        tone="info"
-        label="Opening ≤ 6 days"
-        value={String(buckets.open.length)}
-      />
-      <SummaryBox theme={theme} icon="trending-up" tone="warn" label="Strong GMP" value={String(strongCount)} />
-    </View>
-  );
+  const openingSoonBanner =
+    tab === 'open' && stats.live === 0 && stats.nextToOpen ? stats.nextToOpen : null;
+  const closingToday = tab === 'open' ? stats.closingToday : undefined;
 
   const header = (
-    <View style={{ gap: 14, paddingHorizontal: 0 }}>
-      {SummaryStrip}
-      {tab === 'open' && literallyOpen.length === 0 && nextUp ? (
-        <Animated.View entering={FadeIn.duration(260)} style={[styles.banner, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: theme.warnSoft, alignItems: 'center', justifyContent: 'center' }}>
-              <Ionicons name="moon-outline" size={17} color={theme.warn} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.text, fontSize: 13, fontWeight: '800' }}>
-                No IPO is accepting bids today
-              </Text>
-              <Text style={{ color: theme.textSub, fontSize: 11.5, marginTop: 2 }}>
-                {nextUp.name} opens in {diffDays(today, parseISO(nextUp.openDate))} days on {new Date(parseISO(nextUp.openDate)).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}.
-              </Text>
-            </View>
-          </View>
+    <View style={{ gap: 12 }}>
+      {age.stale ? (
+        <Animated.View
+          entering={FadeIn.duration(240)}
+          style={[styles.callout, { backgroundColor: theme.warnSoft, borderColor: theme.border }]}
+        >
+          <Ionicons name="time-outline" size={17} color={theme.warn} />
+          <Text style={{ flex: 1, fontSize: 11.5, color: theme.textSub, lineHeight: 16 }}>
+            <Text style={{ fontWeight: '800', color: theme.text }}>Snapshot {age.label}. </Text>
+            Figures are exactly as {DATA_SOURCE_LABEL} recorded them on {DATA_AS_OF_LABEL}. Check the exchange
+            or registrar before bidding.
+          </Text>
+          <Pressable onPress={refresh} accessibilityRole="button" accessibilityLabel="Re-check the board">
+            <Text style={{ fontSize: 11.5, fontWeight: '800', color: theme.primary }}>Re-check</Text>
+          </Pressable>
         </Animated.View>
       ) : null}
+
+      {openingSoonBanner ? (
+        <Pressable
+          onPress={() => navigation.navigate('IPODetail', { id: openingSoonBanner.id })}
+          accessibilityRole="button"
+          accessibilityLabel={`${openingSoonBanner.name} opens in ${daysUntil(
+            openingSoonBanner.openDate
+          )} days. Open the IPO.`}
+          style={({ pressed }) => [
+            styles.banner,
+            { backgroundColor: theme.card, borderColor: theme.border },
+            pressed && { opacity: 0.85 },
+          ]}
+        >
+          <View style={[styles.bannerIcon, { backgroundColor: theme.warnSoft }]}>
+            <Ionicons name="moon-outline" size={17} color={theme.warn} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.text, fontSize: 13, fontWeight: '800' }}>No IPO is accepting bids today</Text>
+            <Text style={{ color: theme.textSub, fontSize: 11.5, marginTop: 2, lineHeight: 16 }}>
+              {openingSoonBanner.name} opens in {daysUntil(openingSoonBanner.openDate)} days. Tap to see the price band
+              and reminders.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+        </Pressable>
+      ) : null}
+
+      {closingToday ? (
+        <Pressable
+          onPress={() => navigation.navigate('IPODetail', { id: closingToday.id })}
+          accessibilityRole="button"
+          accessibilityLabel={`${closingToday.name} closes for bidding today`}
+          style={({ pressed }) => [
+            styles.banner,
+            { backgroundColor: theme.upSoft, borderColor: theme.border },
+            pressed && { opacity: 0.85 },
+          ]}
+        >
+          <View style={[styles.bannerIcon, { backgroundColor: theme.card }]}>
+            <Ionicons name="alarm-outline" size={17} color={theme.up} />
+          </View>
+          <Text style={{ flex: 1, color: theme.textSub, fontSize: 11.5, lineHeight: 16 }}>
+            <Text style={{ fontWeight: '800', color: theme.text }}>Closes today: </Text>
+            {closingToday.name} stops accepting bids at 5 PM IST.
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+        </Pressable>
+      ) : null}
+
       <View style={{ paddingHorizontal: 16 }}>
-        <SegmentedTabs
+        <SegmentedTabs<BoardTab>
           theme={theme}
           value={tab}
           onChange={setTab}
+          accessibilityLabel="IPO board sections"
           options={[
-            { key: 'open', label: 'Open', count: buckets.open.length },
-            { key: 'upcoming', label: 'Upcoming', count: buckets.upcoming.length },
-            { key: 'closed', label: 'Closed', count: buckets.closed.length },
+            { key: 'open', label: 'Open', count: board.open.length },
+            { key: 'soon', label: 'Soon', count: board.soon.length },
+            { key: 'closed', label: 'Closed', count: board.closed.length },
           ]}
         />
       </View>
+
+      {list.length > 1 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+        >
+          {SORTS.map((option) => {
+            const active = sort === option.key;
+            return (
+              <Pressable
+                key={option.key}
+                onPress={() => setSort(option.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Sort by ${option.label}`}
+                style={[
+                  styles.sortChip,
+                  {
+                    backgroundColor: active ? theme.primary : theme.card,
+                    borderColor: active ? theme.primary : theme.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: '700',
+                    color: active ? theme.onPrimary : theme.textSub,
+                  }}
+                >
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
     </View>
   );
 
@@ -117,118 +172,125 @@ export function HomeScreen({ theme }: { theme: Theme }) {
         theme={theme}
         large
         title="IPO Pulse"
-        subtitle={`Updated ${updatedTime} \u2022 board as of ${DATA_AS_OF_LABEL}`}
+        subtitle={`Board snapshot ${DATA_AS_OF_LABEL} • checked ${formatIstTime(lastChecked)}`}
         right={
-          <Pressable
+          <IconButton
+            icon="notifications-outline"
             onPress={() => navigation.navigate('Alerts')}
-            style={({ pressed }) => [
-              styles.bell,
-              { backgroundColor: theme.card, borderColor: theme.border },
-              pressed && { opacity: 0.7 },
-            ]}
-          >
-            <Ionicons name="notifications-outline" size={19} color={theme.text} />
-            {alerts.length > 0 ? <View style={[styles.bellDot, { backgroundColor: theme.down }]} /> : null}
-          </Pressable>
+            theme={theme}
+            accessibilityLabel={`Reminder log${alerts.length > 0 ? `, ${alerts.length} entries` : ', empty'}`}
+            badge={alerts.length > 0}
+          />
         }
       />
 
-      {!booted ? (
-        <View style={{ paddingTop: 4 }}>
-          <CardSkeleton theme={theme} />
-          <CardSkeleton theme={theme} />
-          <CardSkeleton theme={theme} />
-        </View>
-      ) : (
-        <FlatList
-          data={data}
-          keyExtractor={(item) => item.id}
-          ListHeaderComponent={header}
-          contentContainerStyle={{ paddingTop: 4, paddingBottom: 34 }}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} colors={[theme.primary]} />
-          }
-          renderItem={({ item, index }) => (
-            <IPOCard
-              ipo={item}
-              theme={theme}
-              index={index}
-              watched={isWatched(item.id)}
-              onPress={() => navigation.navigate('IPODetail', { id: item.id })}
+      <FlatList
+        data={list}
+        keyExtractor={(item) => item.id}
+        ListHeaderComponent={
+          <View>
+            <Row style={styles.tiles} gap={9}>
+              <SummaryTile theme={theme} icon="radio-button-on" tone="up" label="Bidding now" value={String(stats.live)} />
+              <SummaryTile
+                theme={theme}
+                icon="time-outline"
+                tone="info"
+                label="Opening soon"
+                value={String(stats.openingSoon)}
+              />
+              <SummaryTile
+                theme={theme}
+                icon="trending-up"
+                tone="warn"
+                label="Premium ≥ 12%"
+                value={String(stats.healthyPremium)}
+              />
+            </Row>
+            {header}
+            <View style={{ height: 10 }} />
+          </View>
+        }
+        contentContainerStyle={{ paddingBottom: 36 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refresh}
+            tintColor={theme.primary}
+            colors={[theme.primary]}
+          />
+        }
+        renderItem={({ item, index }) => (
+          <IPOCard
+            ipo={item}
+            theme={theme}
+            index={index}
+            watched={isWatched(item.id)}
+            onToggleWatch={toggleWatch}
+            onPress={() => navigation.navigate('IPODetail', { id: item.id })}
+          />
+        )}
+        ListEmptyComponent={
+          <View style={{ alignItems: 'center', paddingVertical: 40, paddingHorizontal: 32 }}>
+            <Ionicons
+              name={tab === 'open' ? 'pause-circle-outline' : 'file-tray-outline'}
+              size={34}
+              color={theme.textMuted}
             />
-          )}
-          ListEmptyComponent={
-            <View style={{ alignItems: 'center', paddingVertical: 46, paddingHorizontal: 32 }}>
-              <Ionicons name="file-tray-outline" size={34} color={theme.textMuted} />
-              <Text style={{ color: theme.text, fontWeight: '800', marginTop: 12, fontSize: 15.5 }}>
-                Nothing in this list
-              </Text>
-              <Text style={{ color: theme.textSub, fontSize: 13, textAlign: 'center', marginTop: 5, lineHeight: 19 }}>
-                {tab === 'closed'
-                  ? 'Closed issues with allotment or listing status will appear here.'
-                  : 'Check the other tabs for the full season calendar.'}
-              </Text>
-            </View>
-          }
-          ListFooterComponent={
-            <Text style={[styles.footer, { color: theme.textMuted }]}>
-              Indicative data from public trackers \u2022 not investment advice.
+            <Text style={{ color: theme.text, fontWeight: '800', marginTop: 12, fontSize: 15.5 }}>
+              {tab === 'open' ? 'No issue is open right now' : 'Nothing in this list'}
             </Text>
-          }
-        />
-      )}
-    </View>
-  );
-}
-
-function SummaryBox({
-  theme,
-  icon,
-  label,
-  value,
-  tone,
-}: {
-  theme: Theme;
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: string;
-  tone: 'up' | 'info' | 'warn';
-}) {
-  const fg = tone === 'up' ? theme.up : tone === 'info' ? theme.info : theme.warn;
-  const bg = tone === 'up' ? theme.upSoft : tone === 'info' ? theme.infoSoft : theme.warnSoft;
-  return (
-    <View style={[styles.summaryBox, { backgroundColor: theme.card, borderColor: theme.border }]}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-        <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }}>
-          <Ionicons name={icon} size={11} color={fg} />
-        </View>
-        <Text numberOfLines={1} style={{ fontSize: 9.5, fontWeight: '700', color: theme.textMuted, letterSpacing: 0.3, flex: 1 }}>
-          {label}
-        </Text>
-      </View>
-      <Text style={{ fontSize: 19, fontWeight: '800', color: theme.text, letterSpacing: -0.4 }}>{value}</Text>
+            <Text style={{ color: theme.textSub, fontSize: 13, textAlign: 'center', marginTop: 5, lineHeight: 19 }}>
+              {tab === 'open'
+                ? 'Check the Soon tab for the next opening, or the Closed tab for allotment and listing updates.'
+                : tab === 'soon'
+                  ? 'Upcoming issues appear here as soon as dates are announced.'
+                  : 'Issues move here once bidding closes, until they list.'}
+            </Text>
+          </View>
+        }
+        ListFooterComponent={
+          <Text style={[styles.footer, { color: theme.textMuted }]}>
+            Indicative data from public trackers • grey market premiums are unofficial • not investment advice.
+          </Text>
+        }
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  summaryRow: { flexDirection: 'row', gap: 9, paddingHorizontal: 16 },
-  summaryBox: { flex: 1, borderRadius: 14, borderWidth: 1, padding: 11 },
+  tiles: { paddingHorizontal: 16, paddingBottom: 12 },
   banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
     marginHorizontal: 16,
-    borderRadius: 14,
+    borderRadius: radius.md,
     borderWidth: 1,
     padding: 12,
   },
-  bell: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
+  callout: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 10,
+    marginHorizontal: 16,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: 11,
   },
-  bellDot: { position: 'absolute', top: 9, right: 10, width: 8, height: 8, borderRadius: 4 },
-  footer: { textAlign: 'center', fontSize: 11, paddingHorizontal: 30, marginTop: 18, lineHeight: 16 },
+  bannerIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  sortChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+  },
+  footer: {
+    textAlign: 'center',
+    fontSize: 11,
+    paddingHorizontal: 30,
+    marginTop: 18,
+    lineHeight: 16,
+  },
 });
