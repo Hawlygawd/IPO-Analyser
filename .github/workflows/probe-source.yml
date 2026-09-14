@@ -38,20 +38,26 @@ jobs:
         run: |
           node - <<'NODE' > excerpt.md
           const fs = require('node:fs');
-          const cap = (t, n) => (t.length > n ? `${t.slice(0, n)}…[+${t.length - n}]` : t);
-          const files = ['gmp.html', 'subscription.html', 'current.html', 'upcoming.html', 'calendar.html'];
+          const read = (file) => fs.readFileSync(`pages/${file}`, 'utf8');
+          const cap = (t, n) => (t.length > n ? `${t.slice(0, n)}\n…[+${t.length - n} chars]` : t);
           const out = [];
-          for (const f of files) {
-            const html = fs.readFileSync(`pages/${f}`, 'utf8');
-            const assigns = [...html.matchAll(/\b([A-Za-z_$][\w$]*)\s*=\s*\[\s*\{/g)].map((m) => m[1]);
-            const parses = [...html.matchAll(/JSON\.parse\(\s*([^)]{0,80})/g)].map((m) => cap(m[1].replace(/\s+/g, ' '), 80));
-            out.push(`\n=== ${f} (${html.length} bytes)`);
-            out.push(`array-of-object assignments: ${JSON.stringify([...new Set(assigns)])}`);
-            out.push(`JSON.parse args: ${JSON.stringify([...new Set(parses)])}`);
-            for (const name of [...new Set(assigns)].slice(0, 2)) {
-              const i = html.search(new RegExp(`\\b${name}\\s*=\\s*\\[\\s*\\{`));
-              out.push(`--- ${name} sample: ${cap(html.slice(i, i + 700), 700)}`);
+          for (const file of ['upcoming', 'current']) {
+            const html = read(`${file}.html`);
+            const opens = [...html.matchAll(/<article\b[^>]*\bclass="[^"]*\bipo-card\b[^"]*"[^>]*>/g)];
+            out.push(`\n\n===== ${file}.html: ${opens.length} cards`);
+            // first card, verbatim
+            if (opens.length) {
+              const start = opens[0].index;
+              const end = html.indexOf('</article>', start);
+              out.push(cap(html.slice(start, end + 10), 6000));
             }
+            // every distinct secondary label with a sample value
+            const labels = [...html.matchAll(/class="ipo-card-secondary-label"[^>]*>([\s\S]{0,60}?)<\/span>[\s\S]{0,240}?class="ipo-card-body-value[^"]*"[^>]*>([\s\S]{0,60}?)<\/span>/g)];
+            out.push(`\n--- label/value pairs (first 12):`);
+            labels.slice(0, 12).forEach((m) => out.push(`  [${m[1].replace(/\s+/g, ' ').trim()}] = [${m[2].replace(/\s+/g, ' ').trim()}]`));
+            // how are dates published on these cards?
+            const times = [...html.matchAll(/<time\b[^>]*\bdatetime="([^"]+)"[^>]*>/g)].map((m) => m[1]);
+            out.push(`\n--- time datetimes (first 12): ${JSON.stringify(times.slice(0, 12))}`);
           }
           console.log(out.join('\n'));
           NODE
