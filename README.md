@@ -164,9 +164,15 @@ Then, in order:
 4. **Refresh with an AI search now**, or just refresh normally: if the boards answer, their figures
    win; if they cannot be read, the model's figures fill in and are labelled as such.
 
-Model names rot faster than app releases, so nothing is hard-coded: the model list decides, a refused
-model name is swapped for one the key can actually reach, and a provider that does not support web
-search or a search request is retried without it rather than failing.
+Model names rot faster than app releases, so nothing is hard-coded: the preference list names
+*families* (flash, mini, sonar, compound...), and the newest version inside the best family the key
+can reach is the one used. That is not theory - Google retired `gemini-2.5-flash` for new keys and
+told the app to use `gemini-3.6-flash` in the error body. A retired name now costs one attempt:
+the check and the live search both walk the ranked list (up to six models per provider for the dry
+check, three for a search), stop immediately when the provider rejects the *key* (401/403), and
+report provider trouble as provider trouble - "Provider trouble - high demand (HTTP 503)" - rather
+than blaming the key. A provider that does not support a search request is retried without it
+instead of failing.
 
 A key that cannot search the web is never asked to guess live figures. Most providers have one
 search knob or another (Gemini's Google grounding, xAI's live search, Anthropic's `web_search`
@@ -212,7 +218,7 @@ Quality gates:
 ```bash
 npm run check:deps   # native dependencies must match the versions Expo SDK 57 ships
 npm run typecheck    # strict TS, app config + node config for scripts/tests
-npm test             # 94 unit tests (tsx --test): data integrity, formatting, analysis, board,
+npm test             # 98 unit tests (tsx --test): data integrity, formatting, analysis, board,
                      # reminders, live parsing + merge, and the AI key layer against fake providers
 npm run board        # prints the board as the app sees it (npm run board -- gmp for the ranking)
 npm run build:web    # static web export into dist/

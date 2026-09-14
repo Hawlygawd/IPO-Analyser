@@ -18,8 +18,8 @@ import { boardPrompt, extractRows, picksForSearch } from './extract';
 import { chat, listModels, type AiHttpOptions } from './client';
 import {
   candidatesForKey,
-  pickModel,
   providerSpec,
+  rankModels,
   searchCapability,
   searchModelFor,
   type AiProviderId,
@@ -36,6 +36,8 @@ export interface AiSearchOptions extends AiHttpOptions {
   search?: boolean;
   /** how many issues to ask about */
   limit?: number;
+  /** how many models to try on one provider before giving up (default 3) */
+  modelAttempts?: number;
   now?: Date;
 }
 
@@ -100,6 +102,14 @@ export async function aiBoardSearch(bundled: IPO[], options: AiSearchOptions): P
 
   for (const spec of specs) {
     const baseUrl = (options.baseUrl ?? '').trim() || spec.baseUrl;
+    let listedCache: string[] | null = null;
+    /** the key's own model list, fetched at most once per provider per search */
+    const discoveredModels = async (): Promise<string[]> => {
+      if (listedCache) return listedCache;
+      if (!spec.listsModels) return (listedCache = []);
+      const listed = await listModels({ spec, baseUrl }, key, options);
+      return (listedCache = listed.ok ? listed.models : []);
+    };
     const wantsSearch = options.search !== false;
     let wanted = wantsSearch && spec.search !== 'none';
     let model = (options.model ?? '').trim() || spec.modelFallback;
@@ -113,8 +123,7 @@ export async function aiBoardSearch(bundled: IPO[], options: AiSearchOptions): P
      * compound), so look for one on the key's own model list before refusing.
      */
     if (wantsSearch && !wanted) {
-      const listed = spec.listsModels ? await listModels({ spec, baseUrl }, key, options) : { ok: false, models: [] as string[] };
-      const hinted = listed.ok ? searchModelFor(listed.models, spec) : undefined;
+      const hinted = searchModelFor(await discoveredModels(), spec);
       if (!hinted) {
         const refusal: AiSearchResult = {
           ...baseResult(spec, model, false, started),
@@ -134,19 +143,43 @@ export async function aiBoardSearch(bundled: IPO[], options: AiSearchOptions): P
       wanted = true;
     }
 
-    let reply = await chat({ spec, baseUrl, model }, key, prompt, { ...options, search: wanted });
-    let servedByFallback = false;
+    /**
+     * Which models to try, best first.
+     *
+     * The list comes from the key's own account, so it already knows what the provider serves
+     * today: a hard-coded default goes stale the moment a model is retired ("gemini-2.5-flash
+     * is no longer available to new users"), and the provider happily lists its replacement.
+     * The user's pick still wins; after that it is newest-version-in-the-best-family.
+     */
+    // Only a real choice (the user's pick, or a search-capable model we found) is treated as
+    // one: the spec's fallback string is a last resort, not a preference, and must not sit
+    // ahead of the models the key can actually reach.
+    const explicit = (options.model ?? '').trim();
+    const fallback = explicit || spec.modelFallback;
+    let candidates: string[] = [];
+    if (rescued) {
+      candidates = [rescued, ...(await discoveredModels()).filter((id) => id !== rescued)];
+    } else if (spec.listsModels) {
+      candidates = rankModels(await discoveredModels(), spec, explicit || null);
+    }
+    if (candidates.length === 0) candidates = [fallback];
 
-    // A model name can rot; when the provider says so, list what the key can reach and retry
-    // once with the best of those instead of giving up on the key.
-    if (!reply.ok && spec.listsModels && (reply.status === 400 || reply.status === 404)) {
-      const listed = await listModels({ spec, baseUrl }, key, options);
-      const discovered = listed.ok ? rescued ?? pickModel(listed.models, spec) : '';
-      if (discovered && discovered !== model) {
-        model = discovered;
-        servedByFallback = true;
-        reply = await chat({ spec, baseUrl, model }, key, prompt, { ...options, search: wanted });
-      }
+    let reply = await chat({ spec, baseUrl, model: candidates[0] }, key, prompt, {
+      ...options,
+      search: wanted,
+    });
+    let servedByFallback = false;
+    model = candidates[0];
+
+    // One refusal is not a verdict on the key: providers retire model names and have demand
+    // spikes per model. Try the next few, and stop early when the key itself was rejected.
+    const searchAttempts = Math.max(1, Math.min(options.modelAttempts ?? 3, candidates.length));
+    for (const next of candidates.slice(1, searchAttempts)) {
+      if (reply.ok) break;
+      if (reply.status === 401 || reply.status === 403) break;
+      reply = await chat({ spec, baseUrl, model: next }, key, prompt, { ...options, search: wanted });
+      model = next;
+      servedByFallback = true;
     }
 
     const attempt = baseResult(spec, model, reply.search || Boolean(rescued), started);

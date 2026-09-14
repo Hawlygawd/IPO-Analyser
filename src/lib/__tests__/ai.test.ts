@@ -14,7 +14,17 @@ import { createRequire } from 'node:module';
 import { checkKey, chat, errorHint, errorMessage, listModels, redact } from '../ai/client';
 import { boardPrompt, coerceRow, extractJsonArray, extractRows, picksForSearch, toIsoInstant, toNumber } from '../ai/extract';
 import { aiBoardSearch, aiIdleStatus, aiSourceStatus } from '../ai/search';
-import { candidatesForKey, detectProvider, looksLikeKey, pickModel, selectableModels } from '../ai/providers';
+import {
+  MODEL_ATTEMPT_LIMIT,
+  candidatesForKey,
+  detectProvider,
+  looksLikeKey,
+  modelVersion,
+  pickModel,
+  providerSpec,
+  rankModels,
+  selectableModels,
+} from '../ai/providers';
 import { emptyParsedLive, SENTINEL_YEAR } from '../live/parse';
 import { mergeAiResult } from '../live';
 import { IPOT } from '../ipoData';
@@ -67,8 +77,18 @@ const geminiModels = {
     { name: 'models/embedding-001', supportedGenerationMethods: ['embedContent'] },
     { name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] },
     { name: 'models/gemini-2.5-flash-lite', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-3.5-flash-lite', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-3.6-flash', supportedGenerationMethods: ['generateContent'] },
   ],
 };
+
+/** What Google really answers for a retired model name (verbatim shape, trimmed). */
+const RETIRED = (model: string, replacement: string) => ({
+  error: {
+    message: `This model models/${model} is no longer available to new users. Please update your code to use models/${replacement} for the latest features and improvements.`,
+    status: 'NOT_FOUND',
+  },
+});
 
 const geminiReply = (text: string) => ({ candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP' }] });
 
@@ -118,8 +138,10 @@ test('the dry check proves a Gemini key end to end', async () => {
   const result = await checkKey({ key, fetcher });
   assert.equal(result.ok, true);
   assert.equal(result.providerId, 'gemini');
-  assert.equal(result.model, 'gemini-2.5-flash-lite');
+  // the account's own list decides: the newest id in the cheapest family, not a baked-in name
+  assert.equal(result.model, 'gemini-3.5-flash-lite');
   assert.ok(result.models.includes('gemini-2.5-flash'));
+  assert.ok(result.models.includes('gemini-3.6-flash'));
   assert.ok(result.steps.some((step) => step.ok && /key accepted/.test(step.label)));
   assert.equal(result.reply, 'OK');
   // the key is sent as a header, never in the URL
@@ -363,7 +385,8 @@ test('a rotted default model is replaced by one the key can reach', async () => 
   const result = await aiBoardSearch(IPOT, { key, providerId: 'gemini', fetcher });
   assert.equal(result.ok, true);
   assert.equal(result.rows.length, 1);
-  assert.equal(calls.length, 3, 'refused model, then the model list, then the retry');
+  assert.equal(result.model, 'gemini-3.5-flash-lite', 'the stale default was never even tried');
+  assert.equal(calls.length, 2, 'the model list, then one chat request');
 });
 
 test('a provider that cannot search is never asked to guess live figures', async () => {
@@ -515,4 +538,82 @@ test('the web proxy only forwards to known provider hosts', async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+/* ------------------------------------------------- model rot (the 2.5 -> 3.x switches) */
+
+test('model ids rank by family, then by the newest version in that family', () => {
+  assert.equal(modelVersion('models/gemini-3.6-flash'), 3.06);
+  assert.equal(modelVersion('gpt-5.1-mini'), 5.01);
+  assert.equal(modelVersion('llama-3.3-70b-versatile'), 3.03, 'the 70b is a parameter count');
+  assert.equal(modelVersion('openai/gpt-oss-20b'), 0, '20b is not a version');
+  assert.ok(modelVersion('gemini-3.6-flash') > modelVersion('gemini-2.5-flash'));
+
+  const gemini = providerSpec('gemini');
+  const ranked = rankModels(
+    ['models/gemini-2.5-flash', 'models/gemini-3.6-flash', 'models/gemini-3.5-flash-lite', 'models/embedding-001'],
+    gemini
+  );
+  assert.equal(ranked[0], 'gemini-3.5-flash-lite', 'the cheapest family is tried first, newest in it');
+  assert.ok(ranked.indexOf('gemini-3.6-flash') < ranked.indexOf('gemini-2.5-flash'));
+  assert.ok(!ranked.includes('embedding-001'), 'an embedding model must never be a candidate');
+
+  // an explicit choice is still respected
+  assert.equal(pickModel(['gemini-2.5-flash', 'gemini-3.6-flash'], gemini, 'gemini-3.6-flash'), 'gemini-3.6-flash');
+});
+
+test('a retired model name costs one attempt, and the newest listed model answers', async () => {
+  // the exact failure from the phone: 2.5 is retired, 2.5-lite too, "latest" is overloaded,
+  // and the account's own list already carries 3.5 / 3.6
+  const key = 'AIzaSyD-1234567890abcdefghijklmnopqrs';
+  const { fetcher, calls } = fakeFetch([
+    { match: /v1beta\/models$/, json: geminiModels },
+    { match: /gemini-2\.5-flash-lite:generateContent/, status: 404, json: RETIRED('gemini-2.5-flash-lite', 'gemini-3.5-flash-lite') },
+    { match: /gemini-2\.5-flash:generateContent/, status: 404, json: RETIRED('gemini-2.5-flash', 'gemini-3.6-flash') },
+    { match: /gemini-flash-latest:generateContent/, status: 503, json: { error: { message: 'This model is currently experiencing high demand.', status: 'UNAVAILABLE' } } },
+    { match: /:generateContent$/, json: geminiReply('OK') },
+  ]);
+
+  const result = await checkKey({ key, providerId: 'gemini', fetcher });
+  assert.equal(result.ok, true, `the check failed: ${result.error ?? ''}`);
+  assert.equal(result.model, 'gemini-3.5-flash-lite', 'the newest model of the cheapest family answered');
+  assert.ok(
+    calls.length <= 1 + MODEL_ATTEMPT_LIMIT,
+    `the check made ${calls.length} calls - it must not walk the whole model list`
+  );
+  assert.ok(result.steps.some((step) => step.label.includes('key accepted')));
+});
+
+test('when every model is busy the key is not blamed', async () => {
+  const key = 'AIzaSyD-1234567890abcdefghijklmnopqrs';
+  const { fetcher, calls } = fakeFetch([
+    { match: /v1beta\/models$/, json: geminiModels },
+    { match: /:generateContent$/, status: 503, json: { error: { message: 'This model is currently experiencing high demand.', status: 'UNAVAILABLE' } } },
+  ]);
+
+  const result = await checkKey({ key, providerId: 'gemini', fetcher });
+  assert.equal(result.ok, false);
+  assert.match(result.hint ?? '', /not rejected/, 'a 503 must not read as a bad key');
+  // it still tries several models before giving up on the provider
+  assert.ok(calls.length >= 3, `only ${calls.length} attempts were made`);
+});
+
+test('a retired model name does not stop the live search either', async () => {
+  const key = 'AIzaSyD-1234567890abcdefghijklmnopqrs';
+  const { fetcher } = fakeFetch([
+    { match: /v1beta\/models$/, json: geminiModels },
+    { match: /gemini-2\.5-flash-lite:generateContent/, status: 404, json: RETIRED('gemini-2.5-flash-lite', 'gemini-3.5-flash-lite') },
+    { match: /gemini-3\.5-flash-lite:generateContent/, json: geminiReply(JSON.stringify([aiRow()])) },
+  ]);
+
+  const result = await aiBoardSearch(IPOT, {
+    key,
+    providerId: 'gemini',
+    // the model remembered from an earlier session, now retired
+    model: 'gemini-2.5-flash-lite',
+    fetcher,
+  });
+  assert.equal(result.ok, true, `the search failed: ${result.error ?? ''}`);
+  assert.equal(result.model, 'gemini-3.5-flash-lite');
+  assert.equal(result.rows.length, 1);
 });

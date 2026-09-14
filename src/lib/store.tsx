@@ -24,7 +24,7 @@ import {
   type ParsedLive,
 } from './live';
 import { aiBoardSearch, aiSourceStatus, aiIdleStatus, type AiSearchResult } from './ai/search';
-import { whenAiReady } from './ai/settings';
+import { setAiConfig, whenAiReady } from './ai/settings';
 import { providerSpec } from './ai/providers';
 import {
   buildReminders,
@@ -522,6 +522,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
         if (!direct && !search?.ok) {
           throw new Error(search?.error ?? directError ?? 'no data in the upstream pages');
+        }
+
+        // Remember the model that actually answered: providers retire names mid-season, and a
+        // remembered dead one costs a wasted request on every later pull.
+        if (search?.ok && search.model && search.model !== ai.model) {
+          void setAiConfig({ model: search.model });
         }
 
         const fetchedAt = Date.now();

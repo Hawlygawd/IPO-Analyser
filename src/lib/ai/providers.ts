@@ -85,8 +85,10 @@ export const AI_PROVIDERS: AiProviderSpec[] = [
     auth: 'gemini-key-header',
     keyPrefixes: ['AIza', 'AQ.'],
     listsModels: true,
-    modelPreference: ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash'],
-    modelFallback: 'gemini-2.5-flash',
+    // families, not versions: the newest id in each family wins (gemini-3.6-flash beats
+    // gemini-2.5-flash), because Google retires the old names for new keys with no notice
+    modelPreference: ['gemini-flash-lite', 'gemini-flash', 'gemini-pro'],
+    modelFallback: 'gemini-flash-latest',
     tokenCap: 'none',
     search: 'google-grounding',
   },
@@ -358,28 +360,83 @@ export function describeKey(raw: string): string {
   return guess ? guess.label : 'Unrecognised shape - checked against every provider';
 }
 
-/**
- * Best model id to try first: an explicit choice wins, then the provider's preference
- * list, then anything cheap-sounding, then the first id the provider lists.
- */
-export function pickModel(models: string[], spec: AiProviderSpec, chosen?: string | null): string {
-  const wanted = (chosen ?? '').trim();
-  if (wanted) return wanted;
-  const available = models.map((model) => model.replace(/^models\//, ''));
-  for (const preference of spec.modelPreference) {
-    const hit = available.find((model) => model.includes(preference));
-    if (hit) return hit;
-  }
-  const cheap = available.filter(
-    (model) =>
-      /(flash|mini|lite|small|instant|haiku|8b|nano|fast|free)/i.test(model) &&
-      !EXCLUDED_MODEL.test(model)
-  );
-  if (cheap.length > 0) return cheap.sort((a, b) => a.length - b.length)[0];
-  const usable = available.filter((model) => !EXCLUDED_MODEL.test(model));
-  if (usable.length > 0) return usable.sort((a, b) => a.length - b.length)[0];
-  return spec.modelFallback;
+/* --------------------------------------------------------------- model picking */
+
+/** "models/gemini-3.6-flash" -> "geminiflash": the family a version is a member of. */
+function familyKey(id: string): string {
+  return id
+    .replace(/^models\//, '')
+    .toLowerCase()
+    .replace(/[\d.]+/g, '')
+    .replace(/[^a-z]+/g, '');
 }
+
+/**
+ * The version a model id advertises: "gemini-3.6-flash" -> 3.06, "gpt-5.1-mini" -> 5.01,
+ * "llama-3.3-70b" -> 3.03 (the 70b is a parameter count, not a version). Ids with no version
+ * at all ("gpt-oss-20b" style aliases) score 0 so a numbered family always outranks them.
+ */
+export function modelVersion(id: string): number {
+  const cleaned = id.replace(/^models\//, '');
+  const matches = [...cleaned.matchAll(/(\d+)(?:[.-](\d+))?/g)];
+  for (const match of matches) {
+    const major = Number(match[1]);
+    const after = cleaned.slice((match.index ?? 0) + match[0].length);
+    // "70b" / "8b" are parameter counts; keep looking for a version
+    if (/^b\b/i.test(after) && major > 10) continue;
+    const minor = match[2] ? Number(match[2]) : 0;
+    return major + Math.min(minor, 99) / 100;
+  }
+  return 0;
+}
+
+/**
+ * Every model on the key's list, best first.
+ *
+ * This is the answer to model rot: providers retire names ("gemini-2.5-flash is no longer
+ * available to new users") faster than any app can ship a release, advertise the successor in
+ * the error text, and list it in the model list we already fetched. So the preference list
+ * names *families* (flash, mini, sonar, compound...) and the newest version inside each family
+ * is chosen - an explicit pick by the user still wins.
+ */
+export function rankModels(models: string[], spec: AiProviderSpec, chosen?: string | null): string[] {
+  const ids: string[] = [];
+  for (const raw of models) {
+    const id = raw.replace(/^models\//, '').trim();
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  const families = spec.modelPreference.map(familyKey);
+  const scored = ids
+    .filter((id) => !EXCLUDED_MODEL.test(id))
+    .map((id) => {
+      const family = familyKey(id);
+      const rank = families.findIndex((candidate) => family.includes(candidate));
+      return {
+        id,
+        rank: rank === -1 ? families.length : rank,
+        version: modelVersion(id),
+        length: id.length,
+      };
+    });
+  scored.sort((a, b) => a.rank - b.rank || b.version - a.version || a.length - b.length);
+
+  const ranked = scored.map((entry) => entry.id);
+  const usable = ranked.length > 0 ? ranked : ids;
+  const wanted = (chosen ?? '').trim().replace(/^models\//, '');
+  if (!wanted) return usable;
+  return [wanted, ...usable.filter((id) => id !== wanted)];
+}
+
+/** The first model worth trying: the user's pick, else the newest of the best family. */
+export function pickModel(models: string[], spec: AiProviderSpec, chosen?: string | null): string {
+  return rankModels(models, spec, chosen)[0] ?? spec.modelFallback;
+}
+
+/**
+ * How many models the app will try before it gives up on a provider. Providers retire and
+ * overload individual models, so a couple of fallbacks turn "key failed" into "it answered".
+ */
+export const MODEL_ATTEMPT_LIMIT = 6;
 
 /** Models that cannot answer a text question, so they must never be picked automatically. */
 export const EXCLUDED_MODEL =
@@ -403,9 +460,8 @@ export function searchModelFor(models: string[], spec: AiProviderSpec): string |
   const usable = models.filter((id) => !/embed|whisper|tts|guard|moderation/i.test(id));
   for (const hint of hints) {
     const matches = usable.filter((id) => id.toLowerCase().includes(hint.toLowerCase()));
-    // "groq/compound-mini" and "groq/compound" both match: prefer the shorter id, which is the
-    // full model rather than a cut-down one
-    if (matches.length) return matches.sort((a, b) => a.length - b.length)[0];
+    // "groq/compound-mini" and "groq/compound" both match: the newest full model wins
+    if (matches.length) return matches.sort((a, b) => modelVersion(b) - modelVersion(a) || a.length - b.length)[0];
   }
   return undefined;
 }

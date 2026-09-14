@@ -188,6 +188,15 @@ jobs:
           Settings screen lists each source with its row count and stamp, and issues that only
           exist live (a new SME opening, for example) are added to the board automatically.
 
+          **New in 1.4.1 - your key keeps working when the provider renames its models.** Google
+          retired gemini-2.5 for new keys and answered every request with "no longer available to new
+          users - use models/gemini-3.6-flash", so the dry check failed even though the key was fine.
+          The app now reads the model list your own key returns, ranks it (newest version inside the
+          best family), and walks it: a retired name costs one attempt instead of the whole check, up
+          to six tries for the dry check and three for a search. A provider that is simply busy now
+          reads "Provider trouble - high demand (HTTP 503)" and says your key was not rejected.
+          The model that finally answers is remembered, so later refreshes go straight to it.
+
           **New in 1.4.0 - a fresher quote, and a clock that tells the truth.** IPO Ji posts one
           grey-market quote in the evening (its GMP page still said 5:30 PM at 9 PM), so the board now
           also reads a second source that refreshes every 30 minutes and stamps every row. Whichever

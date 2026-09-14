@@ -223,13 +223,30 @@ async function main() {
       }
       if (target.includes('generativelanguage.googleapis.com')) {
         if (/\/models(\?|$)/.test(target)) {
+          // the real list as it looked on the phone: the 2.5 generation is still listed but
+          // retired for new keys, and the 3.x names are what actually answer
           return json({
             models: [
               { name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] },
               { name: 'models/gemini-2.5-flash-lite', supportedGenerationMethods: ['generateContent'] },
+              { name: 'models/gemini-3.5-flash-lite', supportedGenerationMethods: ['generateContent'] },
+              { name: 'models/gemini-3.6-flash', supportedGenerationMethods: ['generateContent'] },
               { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] },
             ],
           });
+        }
+        // a retired model answers 404 with Google's own wording; 3.x answers normally
+        if (/gemini-2\.[0-9]/.test(target)) {
+          const asked = /models\/(gemini[\w.-]+?):generateContent/.exec(target)?.[1] ?? 'gemini-2.5-flash';
+          return json(
+            {
+              error: {
+                message: `This model models/${asked} is no longer available to new users. Please update your code to use models/gemini-3.6-flash for the latest features and improvements.`,
+                status: 'NOT_FOUND',
+              },
+            },
+            404
+          );
         }
         const text = /Reply with exactly: OK/.test(sent) ? 'OK' : JSON.stringify(AI_ROWS);
         return json({ candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP' }] });
@@ -545,6 +562,14 @@ async function main() {
     const tested = textOf('#root');
     assert.match(tested, /Key works - Google Gemini/, `the key check did not pass:\n${tested.slice(0, 600)}`);
     assert.match(tested, /key accepted/, `the check did not report the model list step; tail: ${tested.slice(-900)}`);
+    // the retired 2.5 names are refused by the stub, so the model on screen proves the picker
+    // walked past them to the newest one the key can reach
+    assert.match(
+      tested,
+      /gemini-3\.5-flash-lite/,
+      `the check did not fall forward to a current model; tail: ${tested.slice(-900)}`
+    );
+    assert.ok(!/Key works[^]*gemini-2\.5-flash-lite/.test(tested), 'a retired model was reported as the working one');
 
     // dry check 2: does a search actually return figures this app can merge?
     press('Dry-run a search');

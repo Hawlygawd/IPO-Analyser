@@ -305,7 +305,11 @@ export function AiKeyCard({ theme }: { theme: Theme }) {
           <Text style={{ fontSize: 12.5, fontWeight: '800', color: ai.check.ok ? theme.up : theme.down }}>
             {ai.check.ok
               ? `Key works - ${ai.check.providerLabel} • ${ai.check.model} answered in ${(ai.check.latencyMs / 1000).toFixed(1)}s`
-              : `Key failed - ${ai.check.error ?? 'no answer'}`}
+              : // a provider-side failure (overload, retired model names, quota) is not the key's
+                // fault, and the headline must not tell the user their key is broken
+                /not rejected/.test(ai.check.hint ?? '')
+                ? `Provider trouble - ${ai.check.error ?? 'no answer'}`
+                : `Key failed - ${ai.check.error ?? 'no answer'}`}
           </Text>
           {ai.check.hint ? (
             <Text style={{ fontSize: 11.5, color: theme.textSub, marginTop: 4, lineHeight: 16 }}>

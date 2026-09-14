@@ -9,10 +9,10 @@
 
 import {
   AI_PROVIDERS,
-  EXCLUDED_MODEL,
+  MODEL_ATTEMPT_LIMIT,
   candidatesForKey,
-  pickModel,
   providerSpec,
+  rankModels,
   selectableModels,
   type AiProviderId,
   type AiProviderSpec,
@@ -133,7 +133,12 @@ export function errorHint(status: number, message = ''): string {
   if (status === 401 || status === 403 || ((status === 400 || status === 402) && keyish)) {
     return 'the provider rejected this key - check it was copied whole, and that the key is active';
   }
-  if (status === 404) return 'the endpoint or model name was not found for this provider';
+  if (
+    status === 404 ||
+    /no longer available|decommission|unsupported model|not available to new users/i.test(message)
+  ) {
+    return 'the provider retired that model name - the app now picks the newest one your key can reach';
+  }
   if (status === 429) return 'this key is rate limited or its free quota is used up for now';
   if (status === 402) return 'the provider wants billing enabled on this key';
   if (status === 400) return 'the provider did not like the request (usually a model name it does not serve)';
@@ -415,6 +420,8 @@ export interface KeyCheckOptions extends AiHttpOptions {
   model?: string | null;
   /** How many providers to try when the key shape is ambiguous. */
   maxCandidates?: number;
+  /** How many models to try on one provider before giving up on it (default 6). */
+  maxModelAttempts?: number;
 }
 
 /**
@@ -481,23 +488,24 @@ export async function checkKey(options: KeyCheckOptions): Promise<KeyCheckResult
       steps.push({ label: `${spec.label}: no model list`, ok: true, detail: 'this provider has no list endpoint - going straight to a test call' });
     }
 
-    // Try the preferred model, then up to two cheaper candidates if the provider does not
-    // serve it (model names move faster than any default we could bake in).
-    const candidates: string[] = [];
-    const push = (model: string) => {
-      if (model && !candidates.includes(model)) candidates.push(model);
-    };
-    push(pickModel(models, spec, target.model));
-    for (const preference of spec.modelPreference) {
-      const hit = models.find((model) => model.includes(preference));
-      if (hit) push(hit);
-    }
-    for (const model of models.filter((model) => !EXCLUDED_MODEL.test(model))) push(model);
+    /**
+     * The candidates, best first. Model names move faster than any release we could ship:
+     * Google answered a 2.5 request with "no longer available to new users - use
+     * models/gemini-3.6-flash" while handing us a list of 30 models that contained it. So the
+     * order is user's pick, then the newest of the best family, then the rest newest-first -
+     * and a retired name costs one attempt, not the whole check.
+     */
+    const candidates = rankModels(models, spec, target.model);
+    const attemptLimit = Math.max(
+      1,
+      Math.min(options.maxModelAttempts ?? MODEL_ATTEMPT_LIMIT, candidates.length || 1)
+    );
 
     let lastError = '';
     let lastHint = '';
+    let lastStatus = 0;
     let answered = false;
-    for (const model of candidates.slice(0, 3)) {
+    for (const model of candidates.slice(0, attemptLimit)) {
       const reply = await chat({ spec, baseUrl: target.baseUrl, model }, key, PING, {
         ...options,
         chatTimeoutMs: options.chatTimeoutMs ?? 45000,
@@ -523,12 +531,22 @@ export async function checkKey(options: KeyCheckOptions): Promise<KeyCheckResult
       }
       lastError = reply.error ?? 'the model did not answer';
       lastHint = reply.hint ?? '';
+      lastStatus = reply.status;
       steps.push({ label: `${spec.label}: ${model}`, ok: false, detail: lastError, ms: reply.ms });
       if (reply.status === 401 || reply.status === 403) break; // the key is wrong for this provider
     }
 
+    // Every model refused for a reason that has nothing to do with the key (the provider was
+    // overloaded, or it retired the names we knew). Say that, instead of "key failed".
+    if (!answered && lastStatus >= 500) {
+      lastHint =
+        'your key was not rejected - the provider is overloaded or retired the models the app tried; tap Test again in a minute';
+    } else if (!answered && lastStatus === 429) {
+      lastHint = 'your key was not rejected - this key is rate limited or out of free quota for now';
+    }
+
     tried.push({ providerId: spec.id, label: spec.label, error: redact(lastError, key) || 'no model answered' });
-    if (pinned) return fail(spec, target.model ?? spec.modelFallback, lastError, lastHint, models);
+    if (pinned) return fail(spec, candidates[0] ?? spec.modelFallback, lastError, lastHint, models);
     if (answered) break;
   }
 
