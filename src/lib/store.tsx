@@ -141,7 +141,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const map = await AsyncStorage.getMany([
+        // multiGet, not the newer getMany: it is the API that async-storage 2.x (the version
+        // Expo SDK 57 pins) actually exports, and it is all we need here.
+        const stored = await AsyncStorage.multiGet([
           KEY_WATCH,
           KEY_PREFS,
           KEY_ALERTS,
@@ -149,8 +151,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           KEY_IDS,
           KEY_CHECKED,
         ]);
+        const map: Record<string, string | null> = Object.fromEntries(stored);
         if (map[KEY_WATCH]) {
-          const parsed = JSON.parse(map[KEY_WATCH] as string);
+          const parsed = JSON.parse(map[KEY_WATCH]);
           if (Array.isArray(parsed)) {
             // drop any ids that are no longer on the board
             const clean = parsed.filter((id: string) => Boolean(getIpo(id)));
@@ -158,10 +161,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             watchlistRef.current = clean;
           }
         }
-        if (map[KEY_PREFS]) setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(map[KEY_PREFS] as string) });
-        if (map[KEY_ALERTS]) setAlerts(JSON.parse(map[KEY_ALERTS] as string));
-        if (map[KEY_THEME]) setThemeModeState(JSON.parse(map[KEY_THEME] as string));
-        if (map[KEY_IDS]) notifIds.current = JSON.parse(map[KEY_IDS] as string);
+        if (map[KEY_PREFS]) setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(map[KEY_PREFS]) });
+        if (map[KEY_ALERTS]) setAlerts(JSON.parse(map[KEY_ALERTS]));
+        if (map[KEY_THEME]) setThemeModeState(JSON.parse(map[KEY_THEME]));
+        if (map[KEY_IDS]) notifIds.current = JSON.parse(map[KEY_IDS]);
         if (map[KEY_CHECKED]) setLastChecked(Number(map[KEY_CHECKED]) || Date.now());
       } catch {
         // start fresh on any storage error
