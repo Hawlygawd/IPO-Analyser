@@ -1,0 +1,71 @@
+name: Verify APK
+
+# Proves what is inside the APK that is actually published, without rebuilding it: downloads the
+# release asset and checks the things that decide whether it installs and runs - both ARM ABIs,
+# the Hermes bundle, dex code, and a v1 signature. Runs in about a minute.
+#
+# Triggered by tags like apk-check-1 (the APK workflow, which matches v*, is deliberately not
+# triggered by that name).
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'apk-check-*'
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the released APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./app.json').expo.version")"
+          gh release download "v${VERSION}" --pattern '*.apk' --clobber -O ipo-pulse.apk
+          ls -l ipo-pulse.apk
+          sha256sum ipo-pulse.apk > sha256.txt
+          cat sha256.txt
+
+      - name: Inspect the APK
+        run: |
+          AAPT2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)"
+          {
+            echo "size:    $(du -h ipo-pulse.apk | cut -f1)"
+            echo "sha256:  $(cut -d' ' -f1 sha256.txt)"
+            echo
+            echo "abis:    $(unzip -l ipo-pulse.apk | grep -o 'lib/[^/]*/' | sort -u | tr '\n' ' ')"
+            echo "bundle:  $(unzip -l ipo-pulse.apk | grep -c 'assets/index.android.bundle') file(s)"
+            echo "dex:     $(unzip -l ipo-pulse.apk | grep -c 'classes.*\.dex') file(s)"
+            echo "signature files:"
+            unzip -l ipo-pulse.apk | grep -E 'META-INF/.*\.(RSA|SF|MF)' | sed 's/^/  /'
+            echo
+            echo "manifest:"
+            "$AAPT2" dump badging ipo-pulse.apk 2>/dev/null | grep -E "^package|^sdkVersion|^targetSdkVersion|^launchable-activity|^application-label:" | sed 's/^/  /' || echo "  (aapt2 unavailable)"
+          } | tee apk-report.txt
+
+          fail=0
+          unzip -l ipo-pulse.apk | grep -q 'lib/arm64-v8a/' || { echo "MISSING arm64-v8a native libraries"; fail=1; }
+          unzip -l ipo-pulse.apk | grep -q 'lib/armeabi-v7a/' || { echo "MISSING armeabi-v7a native libraries"; fail=1; }
+          unzip -l ipo-pulse.apk | grep -q 'assets/index.android.bundle' || { echo "MISSING the JavaScript bundle - the app would not start"; fail=1; }
+          unzip -l ipo-pulse.apk | grep -qE 'META-INF/.*\.(RSA|SF)' || { echo "the APK is not signed - Android would refuse it"; fail=1; }
+          test "$fail" = 0 || exit 1
+          echo "the published APK is complete and signed"
+
+      - name: Publish the report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          jq -Rs '{name: "apk-verification", head_sha: env.SHA, status: "completed", conclusion: "neutral",
+                   output: {title: "Contents of the published APK", summary: .}}' apk-report.txt > payload.json
+          gh api "repos/${{ github.repository }}/check-runs" -X POST --input payload.json >/dev/null &&
+            echo "published the report as a check run" || echo "could not publish the report"

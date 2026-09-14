@@ -90,12 +90,18 @@ npm run web          # dev server (or: npm start, npm run ios, npm run android)
 Quality gates:
 
 ```bash
+npm run check:deps   # native dependencies must match the versions Expo SDK 57 ships
 npm run typecheck    # strict TS, app config + node config for scripts/tests
 npm test             # 47 unit tests (tsx --test): data integrity, formatting, analysis, board, reminders
 npm run board        # prints the board as the app sees it (npm run board -- gmp for the ranking)
 npm run build:web    # static web export into dist/
 npm run smoke        # renders dist/ in jsdom and clicks through the app
 ```
+
+`npm run check:deps` compares what is installed with `node_modules/expo/bundledNativeModules.json`.
+Web builds hide version drift because react-native-web supplies its own implementations: reanimated
+`^4.6.0` pulled worklets 0.12, where a C++ method that `expo-modules-core` calls had been renamed, so
+the web app was fine while every Android build failed. The check is part of the APK workflow too.
 
 `npm run smoke` is the end-to-end check: it mounts the exported bundle, then walks the board →
 detail screen → lot stepper → watch toggle → GMP board (filters + search, row tap and row star) →

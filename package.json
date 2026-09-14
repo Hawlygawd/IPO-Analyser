@@ -44,10 +44,11 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
-    "test": "tsx --test src/lib/__tests__/*.test.ts",
+    "test": "tsx --test src/lib/__tests__/*.test.ts scripts/__tests__/*.test.ts",
     "test:watch": "tsx --test --watch src/lib/__tests__/*.test.ts",
     "board": "tsx scripts/board-preview.ts",
     "build:web": "expo export --platform web --output-dir dist",
+    "check:deps": "tsx scripts/check-native-versions.ts",
     "apk": "expo prebuild --platform android --no-install && node scripts/android-release.mjs && cd android && ./gradlew assembleRelease",
     "smoke": "tsx scripts/web-smoke.ts"
   },
