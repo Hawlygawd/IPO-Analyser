@@ -41,30 +41,31 @@ jobs:
           const read = (file) => fs.readFileSync(`pages/${file}`, 'utf8');
           const cap = (text, n) => (text.length > n ? `${text.slice(0, n)}\n…[+${text.length - n} chars]` : text);
           const out = [];
-
-          // ---- calendar: cards whose class attribute is not on the same line as the tag name
           const cal = read('calendar.html');
-          const opens = [...cal.matchAll(/<(?:div|article|li|section)\b[^>]*\bclass="[^"]*\bevent-card\b[^"]*"[^>]*>/g)];
-          out.push(`# calendar: ${opens.length} event-card element(s), page ${cal.length} bytes`);
-          opens.slice(0, 2).forEach((m, i) => {
-            const from = m.index;
-            const next = opens[i + 1]?.index ?? from + 2500;
-            out.push(`\n## card ${i} (open tag at ${from})\n` + cap(`${m[0]}\n${cal.slice(from + m[0].length, next)}`, 2400));
-          });
-          const headers = [...cal.matchAll(/<div\b[^>]*\bclass="[^"]*\bevent-date\b[^"]*"[^>]*>[\s\S]{0,500}?<\/div>\s*<\/div>/g)];
-          out.push(`\n\n# event-date headers: ${headers.length}`);
-          headers.slice(0, 3).forEach((h, i) => out.push(`\n## header ${i}\n${cap(h[0].replace(/\s+/g, ' '), 700)}`));
-          const nameTexts = [...cal.matchAll(/<[^>]*\bclass="[^"]*\bevent-name\b[^"]*"[^>]*>([\s\S]{0,80}?)</g)].map((m) => m[1].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim());
-          out.push(`\n# event-name texts (first 12): ${JSON.stringify(nameTexts.slice(0, 12))}`);
-          const tpl = cal.indexOf('${ev.name');
-          out.push(`\n# template mention at ${tpl}; surrounding context:\n${cap(cal.slice(Math.max(0, tpl - 1500), tpl + 900).replace(/\s+/g, ' '), 2400)}`);
 
-          // ---- gmp: is there an embedded JSON copy of the table?
-          const gmp = read('gmp.html');
-          const jsonish = [...gmp.matchAll(/(?:const|let|var)\s+\w+\s*=\s*\[[\s\S]{0,400}/g)].map((m) => m[0].replace(/\s+/g, ' '));
-          out.push(`\n\n# gmp page: ${(gmp.match(/data-name="/g) ?? []).length} data-name attributes, ${jsonish.length} inline JSON-ish arrays`);
-          jsonish.slice(0, 3).forEach((j) => out.push('  ' + cap(j, 300)));
+          // where does eventListData come from?
+          const defs = [...cal.matchAll(/eventListData\s*=\s*[^;]{0,4000}/g)];
+          out.push(`# eventListData assignments: ${defs.length}`);
+          defs.slice(0, 2).forEach((d, i) => out.push(`\n## assignment ${i}\n${cap(d[0], 4000)}`));
 
+          // day headers, tolerantly: any element carrying event-date / event-date-title / event-count
+          const dayEls = [...cal.matchAll(/<[a-z]+\b[^>]*\bclass="[^"]*\bevent-(?:date|date-title|count)\b[^"]*"[^>]*>[\s\S]{0,400}?<\/[a-z]+>/g)];
+          out.push(`\n\n# day header elements: ${dayEls.length}`);
+          dayEls.slice(0, 4).forEach((d, i) => out.push(`\n## day header ${i}\n${cap(d[0].replace(/\s+/g, ' '), 800)}`));
+
+          // the badge texts that mark the event kind
+          const badges = [...cal.matchAll(/<span\b[^>]*\bclass="[^"]*\bbadge_span\b[^"]*"[^>]*>([\s\S]{0,120}?)<\/span>/g)]
+            .map((m) => m[1].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim())
+            .filter((t) => t && !/^(Mainboard|BSE SME|NSE SME|SME)$/i.test(t));
+          out.push(`\n\n# event kind badges present: ${JSON.stringify([...new Set(badges)].slice(0, 12))}`);
+
+          // a card's full text, and the nearest date header before it
+          const opens = [...cal.matchAll(/<[a-z]+\b[^>]*\bclass="[^"]*\bevent-card\b[^"]*"[^>]*>/g)];
+          if (opens.length) {
+            const at = opens[1].index;
+            const before = cal.slice(Math.max(0, at - 1200), at);
+            out.push(`\n\n# markup immediately before the second card:\n${cap(before.replace(/\s+/g, ' '), 1200)}`);
+          }
           console.log(out.join('\n'));
           NODE
           wc -c excerpt.md
