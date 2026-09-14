@@ -42,48 +42,33 @@ jobs:
           const out = [];
           const cap = (s, n) => (s.length > n ? `${s.slice(0, n)}\n…[truncated ${s.length - n} chars]` : s);
 
-          // 1. every table on the GMP page, with the class names that identify it
+          // rows without a quote: what does the GMP cell look like then?
           const gmp = read('gmp.html');
-          const tables = [...gmp.matchAll(/<table[\s\S]*?<\/table>/g)].map((m) => m[0]);
-          out.push(`# GMP page: ${tables.length} table(s), ${gmp.length} bytes`);
-          tables.forEach((t, i) => {
-            const cls = /<table[^>]*class="([^"]*)"/.exec(t)?.[1] ?? '(no class)';
-            const rows = (t.match(/<tr/g) ?? []).length;
-            out.push(`\n## table ${i} class="${cls}" rows=${rows} length=${t.length}\n`);
-            out.push(cap(t, 30000));
-          });
+          const noQuote = [...gmp.matchAll(/<tr class="gmp-row"[\s\S]*?<\/tr>/g)]
+            .map((m) => m[0])
+            .filter((r) => r.includes('data-hasgmp="false"'));
+          out.push(`# GMP page: ${noQuote.length} row(s) without a quote`);
+          noQuote.slice(0, 2).forEach((r) => out.push('\n' + cap(r, 2200)));
 
-          // 2. the first two subscription tables, plus the heading each one sits under
-          const sub = read('subscription.html');
-          const subTables = [...sub.matchAll(/<table[\s\S]*?<\/table>/g)].map((m) => m[0]);
-          out.push(`\n\n# Subscription page: ${subTables.length} table(s)`);
-          subTables.slice(0, 2).forEach((t, i) => {
-            const at = sub.indexOf(t);
-            out.push(`\n## subscription table ${i} length=${t.length}\n`);
-            out.push('### context before it\n');
-            out.push(cap(sub.slice(Math.max(0, at - 900), at), 900));
-            out.push('\n### table\n');
-            out.push(cap(t, 8000));
-          });
-          const headings = [...sub.matchAll(/<h[23][^>]*>([\s\S]{0,120}?)<\/h[23]>/g)].map((m) => m[1].replace(/<[^>]*>/g, '').trim());
-          out.push(`\n### all h2/h3 headings: ${JSON.stringify(headings.slice(0, 40))}`);
+          // any page-level "as of" stamp
+          const stamp = [...gmp.matchAll(/[^<>]{0,80}(?:Last updated|Updated on|As of)[^<>]{0,80}/gi)].map((m) => m[0].trim());
+          out.push(`\n\n# as-of stamps on the GMP page: ${JSON.stringify([...new Set(stamp)].slice(0, 8))}`);
 
-          // 3. one card from the current-ipo page and one from upcoming
-          for (const [label, file, anchor] of [
-            ['current-ipo', 'current.html', /Veegaland/],
-            ['upcoming-ipo', 'upcoming.html', /NSE/],
-          ]) {
-            const html = read(file);
-            const at = html.search(anchor);
-            out.push(`\n\n# ${label} page (${html.length} bytes), anchor at ${at}`);
-            out.push(cap(html.slice(Math.max(0, at - 2500), at + 2500), 5000));
-          }
-
-          // 4. the calendar markup around the first day cell
+          // the calendar body (the head alone matched last time)
           const cal = read('calendar.html');
-          const calAt = cal.search(/event-calendar|calendar-day|data-date/i);
-          out.push(`\n\n# calendar page (${cal.length} bytes), structure anchor at ${calAt}`);
-          out.push(cap(cal.slice(Math.max(0, calAt - 500), calAt + 4500), 5000));
+          const body = cal.slice(cal.indexOf('</head>'));
+          const census = {};
+          for (const m of body.matchAll(/class="([^"]+)"/g)) {
+            for (const cls of m[1].split(/\s+/)) {
+              if (/calend|event|month|day/i.test(cls)) census[cls] = (census[cls] ?? 0) + 1;
+            }
+          }
+          out.push(`\n\n# calendar body class census: ${JSON.stringify(Object.entries(census).sort((a, b) => b[1] - a[1]).slice(0, 25))}`);
+          const at = body.search(/class="[^"]*calend/i);
+          out.push(`\n\n# calendar body around the first calendar class (offset ${at})`);
+          out.push(cap(body.slice(Math.max(0, at - 300), at + 6000), 6300));
+          out.push('\n\n# event-ish links in the calendar body');
+          out.push(JSON.stringify([...body.matchAll(/<a[^>]+href="([^"]*ipo[^"]*)"[^>]*>([\s\S]{0,60}?)<\/a>/g)].slice(0, 12).map((m) => [m[1], m[2].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()])));
 
           console.log(out.join('\n'));
           NODE
