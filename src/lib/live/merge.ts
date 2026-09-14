@@ -300,7 +300,11 @@ function buildIpo(id: string, row: LiveRow, now: Date): IPO | null {
   if (!name || !openDate || !closeDate) return null;
 
   const segment: Segment = row.gmp?.segment ?? row.card?.segment ?? (row.events[0]?.board?.toUpperCase().includes('SME') ? 'SME' : 'Mainboard');
-  const platform = (row.gmp?.platform ?? row.sub?.platform ?? row.events[0]?.board) as Platform | undefined;
+  // Upstream publishes the exchange only for SME issues (BSE SME / NSE SME). For a mainboard
+  // issue it just says "Mainboard", so the platform below is a display default and `exchanges`
+  // stays empty rather than claiming a listing we cannot back up.
+  const publishedPlatform = [row.gmp?.platform, row.sub?.platform, row.card ? undefined : row.events[0]?.board]
+    .find((value): value is string => Boolean(value && /^(nse|bse)( sme)?$/i.test(value))) as Platform | undefined;
   const tentative: MilestoneKey[] = [];
 
   const eventDate = (status: MilestoneKey) =>
@@ -315,26 +319,29 @@ function buildIpo(id: string, row: LiveRow, now: Date): IPO | null {
     id,
     name,
     segment,
-    platform: platform ?? (segment === 'SME' ? 'BSE SME' : 'NSE'),
+    platform: publishedPlatform ?? (segment === 'SME' ? 'BSE SME' : 'NSE'),
     openDate,
     closeDate,
     allotmentDate,
     listingDate,
     tentativeDates: tentative,
-    priceBandLow: row.gmp?.bandLow ?? row.card?.premiumLow,
-    priceBandHigh: row.gmp?.bandHigh ?? row.card?.premiumHigh,
-    exchanges: platform ? [platform] : [],
+    priceBandLow: row.gmp?.bandLow ?? row.card?.bandLow,
+    priceBandHigh: row.gmp?.bandHigh ?? row.card?.bandHigh ?? row.card?.bandLow,
+    lotSize: row.card?.lotSize,
+    issueSizeCr: row.card?.issueSizeCr,
+    exchanges: publishedPlatform ? [publishedPlatform] : [],
     gmp: row.gmp?.gmp ?? row.card?.premiumHigh ?? row.card?.premiumLow,
     gmpUpdated: row.gmp?.updatedAt,
-    subscription: row.sub
-      ? {
-          qib: row.sub.qib,
-          nii: row.sub.nii,
-          retail: row.sub.retail,
-          total: row.sub.total,
-          asOf: row.sub.updatedAt ? istLabel(row.sub.updatedAt) : undefined,
-        }
-      : undefined,
+    subscription:
+      row.sub || row.card?.subscriptionTotal !== undefined
+        ? {
+            qib: row.sub?.qib,
+            nii: row.sub?.nii,
+            retail: row.sub?.retail,
+            total: row.sub?.total ?? row.card?.subscriptionTotal,
+            asOf: row.sub?.updatedAt ? istLabel(row.sub.updatedAt) : undefined,
+          }
+        : undefined,
     about: `Picked up live from the IPO Ji boards on ${istLabel(now.toISOString())}. Open the source page for the full issue details before you bid.`,
     sourceName: 'IPO Ji (live)',
     sourceUrl: row.gmp?.url ?? row.card?.url ?? `https://www.ipoji.com/ipo/${id}-ipo`,

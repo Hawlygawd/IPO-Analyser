@@ -59,9 +59,16 @@ export interface LiveCard {
   name: string;
   segment: LiveSegment;
   status?: string;
+  /** "Exp. Premium": the expected premium over the upper band */
   premiumLow?: number;
   premiumHigh?: number;
   premiumPct?: number;
+  /** "Offer Price" - the price band */
+  bandLow?: number;
+  bandHigh?: number;
+  lotSize?: number;
+  issueSizeCr?: number;
+  subscriptionTotal?: number;
   openDate?: string;
   closeDate?: string;
   url?: string;
@@ -328,7 +335,11 @@ export function parseSubscriptionPage(html: string): { rows: LiveSubscriptionRow
 
 /* ---------------------------------------------------------------- ipo cards */
 
-/** `article.ipo-card` blocks on the current / upcoming pages. */
+/**
+ * `article.ipo-card` blocks on the current / upcoming pages. Each card carries a
+ * `ipo-card-body-stat` block per fact (offer price, lot size, subscription, issue size)
+ * plus the expected premium, all labelled by `ipo-card-secondary-label`.
+ */
 export function parseIpoCards(html: string): LiveCard[] {
   const cards: LiveCard[] = [];
   const opens = openingTags(html, /<article\b[^>]*\bclass="[^"]*\bipo-card\b[^"]*"[^>]*>/);
@@ -340,19 +351,32 @@ export function parseIpoCards(html: string): LiveCard[] {
     const name = textOf(/class="ipo-card-name"[^>]*>([\s\S]*?)<\/(?:h3|h2|div)>/.exec(body)?.[1] ?? '');
     if (!name) return;
 
+    const stats = new Map<string, string>();
+    for (const match of body.matchAll(
+      /class="ipo-card-secondary-label"[^>]*>([\s\S]*?)<\/span>[\s\S]{0,240}?class="ipo-card-body-value[^"]*"[^>]*>([\s\S]*?)<\/span>/g
+    )) {
+      stats.set(textOf(match[1]).toLowerCase(), textOf(match[2]));
+    }
+
     const times = [...body.matchAll(/<time\b[^>]*\bdatetime="([^"]+)"[^>]*>/g)].map((m) => m[1]);
-    const premiumBlock = /Exp\.\s*Premium[\s\S]{0,400}?class="ipo-card-body-value"[^>]*>([\s\S]*?)<\/span>/.exec(body)?.[1];
-    const premiumText = textOf(premiumBlock ?? '');
-    const range = /([\d,.]+)\s*[-–]\s*([\d,.]+)/.exec(premiumText);
+    const premiumText = stats.get('exp. premium') ?? '';
+    const premiumRange = /([\d,.]+)\s*[-–]\s*([\d,.]+)/.exec(premiumText);
+    const offer = stats.get('offer price') ?? stats.get('price band') ?? '';
+    const offerRange = /([\d,.]+)\s*[-–]\s*([\d,.]+)/.exec(offer);
 
     cards.push({
       id: slugToId(href, name),
       name,
       segment: (attr(tag, 'data-ipo-board') ?? '').toUpperCase().includes('SME') ? 'SME' : 'Mainboard',
       status: attr(tag, 'data-ipo-status'),
-      premiumLow: range ? num(range[1]) : num(premiumText),
-      premiumHigh: range ? num(range[2]) : undefined,
+      premiumLow: premiumRange ? num(premiumRange[1]) : num(premiumText),
+      premiumHigh: premiumRange ? num(premiumRange[2]) : undefined,
       premiumPct: num(/\((\d+(?:\.\d+)?)%\)/.exec(premiumText)?.[1]),
+      bandLow: offerRange ? num(offerRange[1]) : num(offer),
+      bandHigh: offerRange ? num(offerRange[2]) : undefined,
+      lotSize: num(stats.get('lot size')),
+      issueSizeCr: num(stats.get('issue size')),
+      subscriptionTotal: num(stats.get('subscription')),
       openDate: toIsoDate(times[0]),
       closeDate: toIsoDate(times[1]),
       url: href ? `https://www.ipoji.com${href.startsWith('/') ? '' : '/'}${href}` : undefined,

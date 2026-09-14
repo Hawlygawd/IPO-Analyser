@@ -133,7 +133,13 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
 
   const facts: { label: string; value: string }[] = [
     { label: 'Issue type', value: ipo.issueType ?? 'TBA' },
-    { label: 'Platform', value: `${ipo.platform} • lists on ${ipo.exchanges.join(' & ')}` },
+    {
+      label: 'Platform',
+      value:
+        ipo.exchanges.length > 0
+          ? `${ipo.platform} • lists on ${ipo.exchanges.join(' & ')}`
+          : ipo.platform,
+    },
     { label: 'Lot size', value: ipo.lotSize != null ? `${ipo.lotSize} shares` : 'TBA' },
     { label: 'Min. investment', value: oneLot != null ? formatRupees(Math.round(oneLot)) : 'TBA' },
     { label: 'Price band', value: priceBandLabel(ipo) },

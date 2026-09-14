@@ -154,14 +154,57 @@ const CARDS_HTML = `
       <h3 class="ipo-card-name" title="Hero Motors Limited IPO">Hero Motors</h3>
       <div class="ipo-card-date"><time datetime="2026-09-16">Sep 16, 2026</time> – <time datetime="2026-09-18">Sep 18, 2026</time></div>
     </div>
-    <div class="ipo-card-header-right">
-      <span class="ipo-card-market-badge" data-ipotype="Mainboard">Mainboard</span>
-      <span class="ipo-card-status-badge">Live</span>
+    <div class="ipo-card-header-right"><span class="ipo-card-market-badge" data-ipotype="Mainboard">Mainboard</span></div>
+  </header>
+  <div class="card-body"><div class="ipo-card-body-top-row">
+    <div class="ipo-card-body-stat">
+      <span class="ipo-card-secondary-label">Exp. Premium</span>
+      <span class="ipo-card-body-value " style="color: green;">₹24 <small>(16%)</small></span>
+    </div>
+    <div class="ipo-card-body-stat">
+      <span class="ipo-card-secondary-label">Offer Price</span>
+      <span class="ipo-card-body-value">₹145-153</span>
+    </div>
+    <div class="ipo-card-body-stat">
+      <span class="ipo-card-secondary-label">Lot Size</span>
+      <span class="ipo-card-body-value">98</span>
+    </div>
+    <div class="ipo-card-body-stat">
+      <span class="ipo-card-secondary-label">Subscription</span>
+      <span class="ipo-card-body-value">
+        2.35x
+      </span>
+    </div>
+    <div class="ipo-card-body-stat">
+      <span class="ipo-card-secondary-label">Issue Size</span>
+      <span class="ipo-card-body-value ipo-card-issue-size">₹1,250 Cr</span>
+    </div>
+  </div></div>
+</article>
+
+<article class="card ipo-card ipo-card-new mb-0 "
+  data-agent-href="/ipo/jio-platforms-ipo"
+  data-ipo-status="upcoming"
+  data-ipo-board="mainboard">
+  <header class="ipo-card-header">
+    <div class="ipo-card-header-middle">
+      <h3 class="ipo-card-name">Jio Platforms</h3>
+      <div class="ipo-card-date"><time datetime="2026-09-24">Sep 24, 2026</time> – <time datetime="2026-09-28">Sep 28, 2026</time></div>
     </div>
   </header>
   <div class="card-body"><div class="ipo-card-body-top-row">
-    <div class="ipo-card-price-band"><span class="ipo-card-secondary-label">Price Band</span><span class="ipo-card-body-value">₹145-153</span></div>
-    <div class="ipo-card-premium"><span class="ipo-card-secondary-label">Exp. Premium</span><span class="ipo-card-body-value">₹24 <small>(16%)</small></span></div>
+    <div class="ipo-card-body-stat">
+      <span class="ipo-card-secondary-label">Offer Price</span>
+      <span class="ipo-card-body-value">₹1,180-1,240</span>
+    </div>
+    <div class="ipo-card-body-stat">
+      <span class="ipo-card-secondary-label">Lot Size</span>
+      <span class="ipo-card-body-value">12</span>
+    </div>
+    <div class="ipo-card-body-stat">
+      <span class="ipo-card-secondary-label">Issue Size</span>
+      <span class="ipo-card-body-value ipo-card-issue-size">₹12,000 Cr</span>
+    </div>
   </div></div>
 </article>
 `;
@@ -258,19 +301,32 @@ test('subscription rows carry every leg, the total and the snapshot stamp', () =
 
 /* --------------------------------------------------------------------- cards */
 
-test('ipo cards give the band, the expected premium and the bidding window', () => {
+test('ipo cards give the band, the expected premium, lot, size and the bidding window', () => {
   const cards = parseIpoCards(CARDS_HTML);
-  assert.equal(cards.length, 1);
-  const [hero] = cards;
+  assert.equal(cards.length, 2);
+  const [hero, jio] = cards;
   assert.equal(hero.id, 'hero-motors');
   assert.equal(hero.segment, 'Mainboard');
   assert.equal(hero.status, 'current');
   assert.equal(hero.premiumLow, 24);
   assert.equal(hero.premiumHigh, undefined); // the card prints a single expected premium
   assert.equal(hero.premiumPct, 16);
+  assert.equal(hero.bandLow, 145);
+  assert.equal(hero.bandHigh, 153);
+  assert.equal(hero.lotSize, 98);
+  assert.equal(hero.issueSizeCr, 1250);
+  assert.equal(hero.subscriptionTotal, 2.35);
   assert.equal(hero.openDate, '2026-09-16');
   assert.equal(hero.closeDate, '2026-09-18');
   assert.equal(hero.url, 'https://www.ipoji.com/ipo/hero-motors-ipo');
+
+  assert.equal(jio.id, 'jio-platforms');
+  assert.equal(jio.status, 'upcoming');
+  assert.equal(jio.bandLow, 1180);
+  assert.equal(jio.bandHigh, 1240);
+  assert.equal(jio.lotSize, 12);
+  assert.equal(jio.issueSizeCr, 12000);
+  assert.equal(jio.premiumLow, undefined); // this card publishes no expected premium
 });
 
 /* ------------------------------------------------------------------ calendar */
@@ -306,7 +362,7 @@ test('source statuses report per-board health', () => {
   assert.equal(byKey.gmp.ok, true);
   assert.equal(byKey.gmp.rows, 3);
   assert.equal(byKey.subscription.rows, 2);
-  assert.equal(byKey.cards.rows, 1);
+  assert.equal(byKey.cards.rows, 2);
   assert.equal(byKey.calendar.ok, false);
   assert.equal(byKey.calendar.error, 'timed out');
 });
@@ -360,9 +416,9 @@ test('live-only issues are appended, with derived milestone dates marked tentati
 
   assert.deepEqual(
     added.map((ipo) => ipo.id),
-    ['legacy-wires']
+    ['legacy-wires', 'jio-platforms']
   );
-  const [legacy] = added;
+  const [legacy, jio] = added;
   assert.equal(legacy.name, 'Legacy Wires');
   assert.equal(legacy.segment, 'SME');
   assert.equal(legacy.platform, 'NSE SME');
@@ -371,8 +427,19 @@ test('live-only issues are appended, with derived milestone dates marked tentati
   assert.equal(legacy.listingDate, '2026-09-17'); // from the calendar event
   assert.equal(legacy.allotmentDate, '2026-09-07'); // derived: one working day after close
   assert.deepEqual(legacy.tentativeDates, ['allotment']);
-  assert.equal(board.added, 1);
-  assert.equal(board.ipos.length, IPOT.length + 1);
+  assert.equal(board.added, 2);
+  assert.equal(board.ipos.length, IPOT.length + 2);
+
+  // a card is also enough to render an issue: band, lot, size and subscription come with it
+  assert.equal(jio.priceBandLow, 1180);
+  assert.equal(jio.priceBandHigh, 1240);
+  assert.equal(jio.lotSize, 12);
+  assert.equal(jio.issueSizeCr, 12000);
+  assert.equal(jio.openDate, '2026-09-24');
+  assert.equal(jio.closeDate, '2026-09-28');
+  assert.deepEqual(jio.tentativeDates, ['allotment', 'listing']);
+  assert.deepEqual(jio.exchanges, []); // the exchange is not published for mainboard issues
+  assert.equal(jio.sourceUrl, 'https://www.ipoji.com/ipo/jio-platforms-ipo');
 });
 
 test('a pull that carries nothing leaves the snapshot alone', () => {
