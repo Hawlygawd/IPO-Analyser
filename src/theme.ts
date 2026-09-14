@@ -85,30 +85,67 @@ export const radius = { sm: 8, md: 12, lg: 16, xl: 22, pill: 999 };
 
 export const space = (n: number) => n * 4;
 
-/** Soft elevated card shadow - platform aware. */
-export function cardShadow(mode: 'light' | 'dark') {
-  if (mode === 'dark') {
-    return Platform.select({
-      web: { boxShadow: '0 1px 3px rgba(0,0,0,0.5)' } as any,
-      default: {
+type ShadowStyle = {
+  elevation?: number;
+  shadowColor?: string;
+  shadowOpacity?: number;
+  shadowRadius?: number;
+  shadowOffset?: { width: number; height: number };
+  boxShadow?: string;
+};
+
+const IS_WEB = Platform.OS === 'web';
+
+/**
+ * Soft elevated card shadow.
+ *
+ * react-native-web deprecated the `shadow*` props in favour of CSS `boxShadow`, so the
+ * web branch must never emit them - otherwise every shadowed surface logs a deprecation
+ * warning. Native keeps the elevation/shadow-props pair.
+ */
+export function cardShadow(mode: 'light' | 'dark'): ShadowStyle {
+  if (IS_WEB) {
+    return {
+      boxShadow:
+        mode === 'dark'
+          ? '0 1px 3px rgba(0,0,0,0.5)'
+          : '0 1px 2px rgba(11,27,51,0.06), 0 6px 16px rgba(11,27,51,0.05)',
+    };
+  }
+  return mode === 'dark'
+    ? {
         elevation: 2,
         shadowColor: '#000',
         shadowOpacity: 0.5,
         shadowRadius: 6,
         shadowOffset: { width: 0, height: 2 },
-      },
-    }) as any;
+      }
+    : {
+        elevation: 2,
+        shadowColor: '#0B1B33',
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
+      };
+}
+
+/** Floating surface shadow (toasts, popovers) - same web/native split as cardShadow. */
+export function floatingShadow(mode: 'light' | 'dark'): ShadowStyle {
+  if (IS_WEB) {
+    return {
+      boxShadow:
+        mode === 'dark'
+          ? '0 10px 30px rgba(0,0,0,0.55)'
+          : '0 10px 30px rgba(11,27,51,0.18)',
+    };
   }
-  return Platform.select({
-    web: { boxShadow: '0 1px 2px rgba(11,27,51,0.06), 0 6px 16px rgba(11,27,51,0.05)' } as any,
-    default: {
-      elevation: 2,
-      shadowColor: '#0B1B33',
-      shadowOpacity: 0.08,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 4 },
-    },
-  }) as any;
+  return {
+    elevation: 6,
+    shadowColor: mode === 'dark' ? '#000' : '#0B1B33',
+    shadowOpacity: mode === 'dark' ? 0.5 : 0.16,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+  };
 }
 
 export const AVATAR_COLORS = [

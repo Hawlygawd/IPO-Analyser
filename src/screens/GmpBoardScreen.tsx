@@ -201,57 +201,62 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
             tone === 'up' ? theme.up : tone === 'warn' ? theme.warn : tone === 'down' ? theme.down : theme.textMuted;
           return (
             <Animated.View entering={FadeIn.delay(Math.min(index, 8) * 25)}>
-              <Pressable
-                onPress={() => navigation.navigate('IPODetail', { id: item.id })}
-                accessibilityRole="button"
-                accessibilityLabel={`${item.name}. ${
-                  item.gmp != null ? `Grey market premium ${formatRupees(item.gmp)}, ${formatPct(pct ?? 0)}` : 'No grey market quote'
-                }. Ranked ${index + 1} of ${rows.length}.`}
-                style={({ pressed }) => [
+              <View
+                style={[
                   styles.row,
                   { backgroundColor: theme.card, borderColor: theme.border },
-                  pressed && { opacity: 0.9 },
                 ]}
               >
-                <Text style={[styles.rank, { color: theme.textMuted }]}>{index + 1}</Text>
-                <Avatar name={item.name} theme={theme} size={38} />
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '800', color: theme.text, letterSpacing: -0.2 }}>
-                    {item.name}
-                  </Text>
-                  <Text numberOfLines={1} style={[styles.meta, { color: theme.textMuted }]}>
-                    {item.platform}
-                    {item.sector ? ` • ${item.sector}` : ''}
-                  </Text>
-                  <Text numberOfLines={1} style={[styles.meta, { color: theme.textMuted, marginTop: 2 }]}>
-                    {item.gmpUpdated ? `quote ${formatIstTime(item.gmpUpdated)} IST` : 'no quote recorded'}
-                  </Text>
-                </View>
+                <Pressable
+                  onPress={() => navigation.navigate('IPODetail', { id: item.id })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${item.name}. ${
+                    item.gmp != null
+                      ? `Grey market premium ${formatRupees(item.gmp)}, ${formatPct(pct ?? 0)}`
+                      : 'No grey market quote'
+                  }. Ranked ${index + 1} of ${rows.length}.`}
+                  style={({ pressed }) => [styles.rowPressArea, pressed && { opacity: 0.9 }]}
+                >
+                  <Text style={[styles.rank, { color: theme.textMuted }]}>{index + 1}</Text>
+                  <Avatar name={item.name} theme={theme} size={38} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '800', color: theme.text, letterSpacing: -0.2 }}>
+                      {item.name}
+                    </Text>
+                    <Text numberOfLines={1} style={[styles.meta, { color: theme.textMuted }]}>
+                      {item.platform}
+                      {item.sector ? ` • ${item.sector}` : ''}
+                    </Text>
+                    <Text numberOfLines={1} style={[styles.meta, { color: theme.textMuted, marginTop: 2 }]}>
+                      {item.gmpUpdated ? `quote ${formatIstTime(item.gmpUpdated)} IST` : 'no quote recorded'}
+                    </Text>
+                  </View>
 
-                <View style={{ alignItems: 'flex-end', gap: 5 }}>
-                  <Text style={{ fontSize: 14.5, fontWeight: '800', color: fg }}>
-                    {pct != null ? formatPct(pct) : item.gmp != null ? formatRupees(item.gmp) : 'TBA'}
-                  </Text>
-                  <PremiumBar pct={pct} theme={theme} width={56} />
-                </View>
+                  <View style={{ alignItems: 'flex-end', gap: 5 }}>
+                    <Text style={{ fontSize: 14.5, fontWeight: '800', color: fg }}>
+                      {pct != null ? formatPct(pct) : item.gmp != null ? formatRupees(item.gmp) : 'TBA'}
+                    </Text>
+                    <PremiumBar pct={pct} theme={theme} width={56} />
+                  </View>
+                </Pressable>
 
                 <Pressable
                   onPress={() => toggleWatch(item)}
-                  hitSlop={10}
+                  hitSlop={12}
                   accessibilityRole="button"
                   accessibilityLabel={
                     isWatched(item.id) ? `Remove ${item.name} from watchlist` : `Add ${item.name} to watchlist`
                   }
                   accessibilityState={{ selected: isWatched(item.id) }}
-                  style={{ padding: 4 }}
+                  style={({ pressed }) => [styles.star, pressed && { opacity: 0.6 }]}
                 >
                   <Ionicons
                     name={isWatched(item.id) ? 'star' : 'star-outline'}
-                    size={16}
+                    size={17}
                     color={isWatched(item.id) ? theme.warn : theme.textMuted}
                   />
                 </Pressable>
-              </Pressable>
+              </View>
             </Animated.View>
           );
         }}
@@ -337,14 +342,21 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
     marginHorizontal: 16,
     marginBottom: 8,
-    paddingVertical: 11,
-    paddingHorizontal: 12,
     borderRadius: radius.lg,
     borderWidth: 1,
   },
+  rowPressArea: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 11,
+    paddingLeft: 12,
+    paddingRight: 4,
+  },
+  star: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
   rank: { fontSize: 11, fontWeight: '800', width: 16, textAlign: 'center' },
   meta: { fontSize: 10.5, marginTop: 1, fontWeight: '600' },
 });

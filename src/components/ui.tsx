@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AVATAR_COLORS, cardShadow, radius, Theme } from '../theme';
+import { AVATAR_COLORS, cardShadow, floatingShadow, radius, Theme } from '../theme';
 import { colorFromString, initials } from '../lib/format';
 
 /** Figures line up in columns when the platform font supports tabular numerals. */
@@ -503,10 +503,10 @@ export function ToastHost({
 
   return (
     <Animated.View
-      pointerEvents="box-none"
       style={[
         styles.toastWrap,
         {
+          pointerEvents: 'box-none',
           // anchored to the top so it can never cover the sticky action bar
           top: insets.top + 10,
           opacity: anim,
@@ -518,7 +518,11 @@ export function ToastHost({
         onPress={onDismiss}
         accessibilityRole="button"
         accessibilityLabel={`${message}. Dismiss.`}
-        style={[styles.toast, { backgroundColor: theme.card, borderColor: theme.border }]}
+        style={[
+          styles.toast,
+          floatingShadow(theme.mode),
+          { backgroundColor: theme.card, borderColor: theme.border },
+        ]}
       >
         <View
           style={{
@@ -585,10 +589,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     maxWidth: 520,
     width: '100%',
-    shadowColor: '#0B1B33',
-    shadowOpacity: 0.14,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
   },
 });

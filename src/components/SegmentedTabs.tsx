@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Animated, LayoutChangeEvent, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { radius, Theme } from '../theme';
+import { floatingShadow, radius, Theme } from '../theme';
 
 export interface SegmentOption<T extends string> {
   key: T;
@@ -55,10 +55,11 @@ export function SegmentedTabs<T extends string>({
     >
       {segment > 0 ? (
         <Animated.View
-          pointerEvents="none"
           style={[
             styles.indicator,
+            floatingShadow(theme.mode),
             {
+              pointerEvents: 'none',
               width: segment,
               backgroundColor: theme.card,
               transform: [{ translateX }],
@@ -105,11 +106,6 @@ const styles = StyleSheet.create({
     bottom: PAD,
     left: PAD,
     borderRadius: radius.pill,
-    shadowColor: '#0B1B33',
-    shadowOpacity: 0.08,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
   },
   seg: {
     flex: 1,

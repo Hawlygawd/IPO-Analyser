@@ -46,8 +46,21 @@ npm run smoke        # renders dist/ in jsdom and clicks through the app
 ```
 
 `npm run smoke` is the end-to-end check: it mounts the exported bundle, then walks the board →
-detail screen → lot stepper → watch toggle → GMP board (filters + search) → watchlist → settings
-(including a dark-theme repaint), asserting on the rendered DOM and failing on any console error.
+detail screen → lot stepper → watch toggle → GMP board (filters + search, row tap and row star) →
+watchlist → settings (including a dark-theme repaint), asserting on the rendered DOM and failing on
+any console error.
+
+Point it at the Metro dev bundle for the stricter run, where React's development warnings (deprecated
+`shadow*` / `pointerEvents` props, invalid DOM nesting) fail the test:
+
+```bash
+npx expo start --web --port 8081          # in one terminal
+WEB_DEV_BUNDLE_URL="http://127.0.0.1:8081/index.bundle?platform=web&dev=true" npm run smoke
+```
+
+The tab bar still logs the upstream `pointerEvents` deprecation from `@react-navigation/bottom-tabs`
+(pinned at its latest 7.x), so that one message is allowlisted — the app's own files are scanned
+statically by `assertNoDeprecatedProps()` in the same script instead.
 
 ## Architecture
 

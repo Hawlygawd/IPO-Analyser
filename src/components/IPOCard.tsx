@@ -54,119 +54,131 @@ export function IPOCard({ ipo, theme, onPress, watched, onToggleWatch, index = 0
 
   return (
     <Animated.View entering={FadeInDown.delay(Math.min(index, 7) * 40).duration(300)}>
-      <Pressable
-        onPress={onPress}
-        accessibilityRole="button"
-        accessibilityLabel={`${ipo.name}, ${ipo.platform} ${ipo.segment} IPO. ${phase.label}. ${
-          ipo.gmp != null ? `Grey market premium ${formatRupees(ipo.gmp)}` : 'No grey market quote'
-        }. ${dateLine(ipo)}.`}
-        accessibilityHint="Opens the full analysis for this IPO"
-        style={({ pressed }) => [
+      {/*
+        The card body and the watch star are siblings, not nested: nesting one button inside
+        another produces invalid DOM on web and confuses screen readers.
+      */}
+      <View
+        style={[
           styles.card,
           { backgroundColor: theme.card, borderColor: theme.border },
           cardShadow(theme.mode),
-          pressed && { opacity: 0.92 },
         ]}
       >
-        <View style={styles.topRow}>
-          <Avatar name={ipo.name} theme={theme} size={42} />
-          <View style={styles.titleCol}>
-            <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
-              {ipo.name}
-            </Text>
-            <Text style={[styles.meta, { color: theme.textMuted }]} numberOfLines={1}>
-              {[ipo.platform, ipo.sector].filter(Boolean).join(' • ')}
-            </Text>
+        <Pressable
+          onPress={onPress}
+          accessibilityRole="button"
+          accessibilityLabel={`${ipo.name}, ${ipo.platform} ${ipo.segment} IPO. ${phase.label}. ${
+            ipo.gmp != null ? `Grey market premium ${formatRupees(ipo.gmp)}` : 'No grey market quote'
+          }. ${dateLine(ipo)}.`}
+          accessibilityHint="Opens the full analysis for this IPO"
+          style={({ pressed }) => [styles.pressArea, pressed && { opacity: 0.92 }]}
+        >
+          <View style={styles.topRow}>
+            <Avatar name={ipo.name} theme={theme} size={42} />
+            <View style={styles.titleCol}>
+              <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
+                {ipo.name}
+              </Text>
+              <Text style={[styles.meta, { color: theme.textMuted }]} numberOfLines={1}>
+                {[ipo.platform, ipo.sector].filter(Boolean).join(' • ')}
+              </Text>
+            </View>
+            <View style={{ alignItems: 'flex-end', gap: 6 }}>
+              <Chip label={phase.label} tone={phaseTone(phase.key)} theme={theme} small />
+              {/* space reserved for the star overlay so the layout does not shift */}
+              <View style={styles.starSlot} />
+            </View>
           </View>
-          <View style={{ alignItems: 'flex-end', gap: 6 }}>
-            <Chip label={phase.label} tone={phaseTone(phase.key)} theme={theme} small />
-            {onToggleWatch ? (
-              <Pressable
-                onPress={() => onToggleWatch(ipo)}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel={watched ? `Remove ${ipo.name} from watchlist` : `Add ${ipo.name} to watchlist`}
-                accessibilityState={{ selected: !!watched }}
-                style={styles.star}
-              >
-                <Ionicons
-                  name={watched ? 'star' : 'star-outline'}
-                  size={16}
-                  color={watched ? theme.warn : theme.textMuted}
-                />
-              </Pressable>
-            ) : watched ? (
-              <Ionicons name="star" size={14} color={theme.warn} />
+
+          <View style={[styles.dateRow, { borderTopColor: theme.border }]}>
+            <Ionicons name="calendar-outline" size={13} color={theme.textMuted} />
+            <Text style={[styles.dateText, { color: theme.textSub }]} numberOfLines={1}>
+              {dateLine(ipo)}
+            </Text>
+            <View style={{ flex: 1 }} />
+            <MicroLabel theme={theme}>{signal.label}</MicroLabel>
+          </View>
+
+          {retail != null ? (
+            <View style={styles.barRow}>
+              <PremiumBar pct={pct} theme={theme} width={64} />
+              <Text style={{ fontSize: 11, color: theme.textMuted, fontWeight: '600', flex: 1 }} numberOfLines={1}>
+                {rankHint(rows)}
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={[styles.statRow, { borderTopColor: theme.border }]}>
+            <View style={styles.statCell}>
+              <MicroLabel theme={theme}>GMP / premium</MicroLabel>
+              <Text style={[styles.statValue, numeric, { color: toneColor }]}>{gmp.value}</Text>
+              <Text style={[styles.statSub, { color: theme.textMuted }]} numberOfLines={1}>
+                {listing != null ? `≈ ${formatRupees(listing)} listing` : gmp.sub}
+              </Text>
+            </View>
+            <View style={[styles.statCell, styles.statCellDivider, { borderLeftColor: theme.border }]}>
+              <MicroLabel theme={theme}>Subscription</MicroLabel>
+              <Text style={[styles.statValue, numeric, { color: theme.text }]}>{sub.value}</Text>
+              <Text style={[styles.statSub, { color: theme.textMuted }]} numberOfLines={1}>
+                {sub.sub}
+              </Text>
+            </View>
+            <View style={[styles.statCell, styles.statCellDivider, { borderLeftColor: theme.border }]}>
+              <MicroLabel theme={theme}>{investment != null ? 'Min. lot' : 'Price band'}</MicroLabel>
+              <Text style={[styles.statValue, numeric, { color: theme.text }]} numberOfLines={1}>
+                {investment != null
+                  ? formatRupees(Math.round(investment))
+                  : ipo.priceBandHigh != null
+                    ? priceBandLabel(ipo)
+                    : 'TBA'}
+              </Text>
+              <Text style={[styles.statSub, { color: theme.textMuted }]} numberOfLines={1}>
+                {investment != null
+                  ? `${ipo.lotSize} shares`
+                  : ipo.priceBandHigh != null
+                    ? 'lot size not published'
+                    : 'awaiting RHP'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.footerRow}>
+            <Chip
+              label={`Demand ${mood.label}`}
+              tone={moodTone}
+              theme={theme}
+              small
+              accessibilityLabel={`Derived demand signal: ${mood.label}, score ${mood.score} of 100`}
+            />
+            {ipo.gmp === 0 ? <Chip label="Flat quote" tone="neutral" theme={theme} small /> : null}
+            {ipo.tentativeDates.length > 0 ? (
+              <Chip label="Dates tentative" tone="warn" theme={theme} small icon="alert-circle-outline" />
             ) : null}
           </View>
-        </View>
+        </Pressable>
 
-        <View style={[styles.dateRow, { borderTopColor: theme.border }]}>
-          <Ionicons name="calendar-outline" size={13} color={theme.textMuted} />
-          <Text style={[styles.dateText, { color: theme.textSub }]} numberOfLines={1}>
-            {dateLine(ipo)}
-          </Text>
-          <View style={{ flex: 1 }} />
-          <MicroLabel theme={theme}>{signal.label}</MicroLabel>
-        </View>
-
-        {retail != null ? (
-          <View style={styles.barRow}>
-            <PremiumBar pct={pct} theme={theme} width={64} />
-            <Text style={{ fontSize: 11, color: theme.textMuted, fontWeight: '600', flex: 1 }} numberOfLines={1}>
-              {rankHint(rows)}
-            </Text>
+        {onToggleWatch ? (
+          <Pressable
+            onPress={() => onToggleWatch(ipo)}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={watched ? `Remove ${ipo.name} from watchlist` : `Add ${ipo.name} to watchlist`}
+            accessibilityState={{ selected: !!watched }}
+            style={({ pressed }) => [styles.star, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons
+              name={watched ? 'star' : 'star-outline'}
+              size={17}
+              color={watched ? theme.warn : theme.textMuted}
+            />
+          </Pressable>
+        ) : watched ? (
+          <View style={styles.star}>
+            <Ionicons name="star" size={15} color={theme.warn} />
           </View>
         ) : null}
-
-        <View style={[styles.statRow, { borderTopColor: theme.border }]}>
-          <View style={styles.statCell}>
-            <MicroLabel theme={theme}>GMP / premium</MicroLabel>
-            <Text style={[styles.statValue, numeric, { color: toneColor }]}>{gmp.value}</Text>
-            <Text style={[styles.statSub, { color: theme.textMuted }]} numberOfLines={1}>
-              {listing != null ? `≈ ${formatRupees(listing)} listing` : gmp.sub}
-            </Text>
-          </View>
-          <View style={[styles.statCell, styles.statCellDivider, { borderLeftColor: theme.border }]}>
-            <MicroLabel theme={theme}>Subscription</MicroLabel>
-            <Text style={[styles.statValue, numeric, { color: theme.text }]}>{sub.value}</Text>
-            <Text style={[styles.statSub, { color: theme.textMuted }]} numberOfLines={1}>
-              {sub.sub}
-            </Text>
-          </View>
-          <View style={[styles.statCell, styles.statCellDivider, { borderLeftColor: theme.border }]}>
-            <MicroLabel theme={theme}>{investment != null ? 'Min. lot' : 'Price band'}</MicroLabel>
-            <Text style={[styles.statValue, numeric, { color: theme.text }]} numberOfLines={1}>
-              {investment != null
-                ? formatRupees(Math.round(investment))
-                : ipo.priceBandHigh != null
-                  ? priceBandLabel(ipo)
-                  : 'TBA'}
-            </Text>
-            <Text style={[styles.statSub, { color: theme.textMuted }]} numberOfLines={1}>
-              {investment != null
-                ? `${ipo.lotSize} shares`
-                : ipo.priceBandHigh != null
-                  ? 'lot size not published'
-                  : 'awaiting RHP'}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.footerRow}>
-          <Chip
-            label={`Demand ${mood.label}`}
-            tone={moodTone}
-            theme={theme}
-            small
-            accessibilityLabel={`Derived demand signal: ${mood.label}, score ${mood.score} of 100`}
-          />
-          {ipo.gmp === 0 ? <Chip label="Flat quote" tone="neutral" theme={theme} small /> : null}
-          {ipo.tentativeDates.length > 0 ? (
-            <Chip label="Dates tentative" tone="warn" theme={theme} small icon="alert-circle-outline" />
-          ) : null}
-        </View>
-      </Pressable>
+      </View>
     </Animated.View>
   );
 }
@@ -181,15 +193,25 @@ const styles = StyleSheet.create({
   card: {
     marginHorizontal: 16,
     marginBottom: 10,
-    padding: 13,
     borderRadius: radius.lg,
     borderWidth: 1,
+    position: 'relative',
   },
+  pressArea: { padding: 13 },
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
   titleCol: { flex: 1, gap: 2 },
   name: { fontSize: 15, fontWeight: '800', letterSpacing: -0.2 },
   meta: { fontSize: 11.5, fontWeight: '600' },
-  star: { padding: 2 },
+  starSlot: { width: 34, height: 17 },
+  star: {
+    position: 'absolute',
+    top: 44,
+    right: 6,
+    width: 40,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
