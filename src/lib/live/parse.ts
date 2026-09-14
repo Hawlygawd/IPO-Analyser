@@ -76,6 +76,38 @@ export interface LiveCard {
   url?: string;
 }
 
+/**
+ * One row produced by the AI assist (`src/lib/ai/*`): the same kind of figure the pages
+ * publish, found by asking a model with web search instead of by parsing markup.
+ *
+ * Kept separate from the parsed page rows on purpose: the merge gives published-page rows
+ * precedence over these, and the UI labels anything that came through here.
+ */
+export interface LiveAiRow {
+  /** upstream slug, when the model knew it - matching falls back to the name */
+  id?: string;
+  name: string;
+  /** grey market premium in ₹ over the upper band */
+  gmp?: number;
+  gmpUpdated?: string;
+  bandLow?: number;
+  bandHigh?: number;
+  subscriptionTotal?: number;
+  subscriptionAsOf?: string;
+  openDate?: string;
+  closeDate?: string;
+  /** when the model says those figures were published */
+  asOf?: string;
+  sourceUrl?: string;
+}
+
+export interface LiveAiParse {
+  rows: LiveAiRow[];
+  asOf?: string;
+  /** rows the model returned that could not be believed */
+  rejected?: number;
+}
+
 export interface LiveCalendarEvent {
   date: string;
   name: string;
@@ -192,9 +224,9 @@ export function slugToId(slug: string | undefined, name?: string): string {
 const PLATFORMS = ['NSE SME', 'BSE SME', 'NSE', 'BSE'];
 
 /** Upstream pads an unknown date with this sentinel and prints "TBA" over it. */
-const SENTINEL_YEAR = 2040;
+export const SENTINEL_YEAR = 2040;
 
-function within(value: number | undefined, min: number, max: number): number | undefined {
+export function within(value: number | undefined, min: number, max: number): number | undefined {
   return value !== undefined && value >= min && value <= max ? value : undefined;
 }
 
@@ -499,6 +531,19 @@ export interface ParsedLive {
   subscription: { rows: LiveSubscriptionRow[]; asOf?: string };
   cards: LiveCard[];
   calendar: LiveCalendarDay[];
+  /** figures found by the AI assist, merged under everything the pages published */
+  ai: LiveAiParse;
+}
+
+/** An all-empty parse, so a caller can hand just one source (the AI assist) to the merge. */
+export function emptyParsedLive(ai: Partial<LiveAiParse> = {}): ParsedLive {
+  return {
+    gmp: { rows: [], quoted: 0, tracked: 0 },
+    subscription: { rows: [] },
+    cards: [],
+    calendar: [],
+    ai: { rows: [], ...ai },
+  };
 }
 
 /** Parses every page we managed to download. Missing pages simply yield nothing. */
@@ -510,5 +555,6 @@ export function parseLivePages(pages: LivePages): ParsedLive {
       .filter((html): html is string => Boolean(html))
       .flatMap((html) => parseIpoCards(html)),
     calendar: pages.calendar ? parseEventCalendar(pages.calendar) : [],
+    ai: { rows: [] },
   };
 }

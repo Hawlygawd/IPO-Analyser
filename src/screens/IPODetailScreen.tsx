@@ -411,10 +411,37 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
             <KeyValueRow theme={theme} label="Source" value={ipo.sourceName} />
             <KeyValueRow
               theme={theme}
-              label={live.fetchedAt ? 'Last live update' : 'Board snapshot'}
-              value={live.fetchedAt ? `${boardAsOfLabel} (${DATA_SOURCE_LABEL})` : boardAsOfLabel}
+              label={live.state === 'ai' ? 'Last live update' : live.fetchedAt ? 'Last live update' : 'Board snapshot'}
+              value={
+                live.fetchedAt
+                  ? `${boardAsOfLabel} (${
+                      live.state === 'ai'
+                        ? `AI web search via ${live.ai?.providerLabel ?? 'your key'}`
+                        : DATA_SOURCE_LABEL
+                    })`
+                  : boardAsOfLabel
+              }
               multiline
             />
+            {ipo.aiFilled ? (
+              <KeyValueRow
+                theme={theme}
+                label="Filled by AI search"
+                value={live.ai ? `${live.ai.providerLabel} • ${live.ai.model}` : 'your saved key'}
+                tone="info"
+                multiline
+              />
+            ) : null}
+            {ipo.aiFilled && ipo.aiSourceUrl ? (
+              <KeyValueRow
+                theme={theme}
+                label="AI source page"
+                value="Open"
+                tone="primary"
+                icon="open-outline"
+                onPress={() => Linking.openURL(ipo.aiSourceUrl as string).catch(() => undefined)}
+              />
+            ) : null}
             {ipo.gmpUpdated ? (
               <KeyValueRow theme={theme} label="GMP quote recorded" value={`${formatIstTime(ipo.gmpUpdated)} IST`} />
             ) : null}
@@ -427,8 +454,9 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
               style={{ marginTop: 12 }}
             />
             <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 10, lineHeight: 16 }}>
-              Figures are a copy of what the tracker published on the snapshot date. Always confirm dates and
-              subscription on the exchange or registrar before you bid.
+              {ipo.aiFilled
+                ? 'Some figures on this issue came from an AI web search rather than from a published board, and are marked as such. Open the source page and confirm on the exchange or registrar before you bid.'
+                : 'Figures are a copy of what the tracker published. Always confirm dates and subscription on the exchange or registrar before you bid.'}
             </Text>
           </SectionCard>
         </Animated.View>

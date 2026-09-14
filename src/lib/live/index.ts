@@ -6,7 +6,7 @@
  */
 
 import type { IPO } from '../types';
-import { parseLivePages, type ParsedLive } from './parse';
+import { emptyParsedLive, parseLivePages, type ParsedLive } from './parse';
 import {
   mergeBoard,
   SOURCE_LABELS,
@@ -26,8 +26,24 @@ export function hasLiveData(parsed: ParsedLive): boolean {
     parsed.gmp.rows.length > 0 ||
     parsed.subscription.rows.length > 0 ||
     parsed.cards.length > 0 ||
-    parsed.calendar.length > 0
+    parsed.calendar.length > 0 ||
+    parsed.ai.rows.length > 0
   );
+}
+
+/**
+ * Every board marked unavailable, for the case where the pull did not even get far enough
+ * to name a per-page error (offline phone, DNS failure). Settings lists sources one by one,
+ * so it must not show a four-source pull as "nothing happened".
+ */
+export function failedSourceStatuses(error: string): LiveSourceStatus[] {
+  return (['gmp', 'subscription', 'cards', 'calendar'] as LiveSourceKey[]).map((key) => ({
+    key,
+    label: SOURCE_LABELS[key],
+    ok: false,
+    rows: 0,
+    error,
+  }));
 }
 
 export function sourceStatuses(
@@ -60,6 +76,23 @@ export function sourceStatuses(
       errors.calendar
     ),
   ];
+}
+
+/**
+ * Merges AI-assist rows over a base board through exactly the same rules the parsed pages
+ * go through - published rows win, so this is safe to run *before* a page merge and to
+ * layer underneath one.
+ */
+export function mergeAiResult(
+  bundled: IPO[],
+  result: { rows: ParsedLive['ai']['rows']; asOf?: string; rejected?: number },
+  meta: { fetchedAt: number; sources: LiveSourceStatus[] }
+): LiveBoard {
+  return mergeBoard(
+    bundled,
+    emptyParsedLive({ rows: result.rows, asOf: result.asOf, rejected: result.rejected }),
+    meta
+  );
 }
 
 export interface PullResult {

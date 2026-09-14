@@ -109,13 +109,72 @@ Two layers, in this order:
    fills in everything the live pages do not carry (sector, lot size, issue size, the written
    analysis). `DATA_AS_OF` stamps it, and the app says *Snapshot* rather than pretending.
 
+3. **Your own AI key (optional).** Some networks - and some carriers - cannot reach the boards at
+   all, and no amount of parsing fixes a 403. When that happens, and a key has been saved in
+   Settings, the same refresh asks an AI model (with live web search where the provider offers it)
+   for the current premium and subscription figures and merges whatever survives the plausibility
+   checks. The key can be from **any** of the supported providers - Google Gemini, OpenAI, xAI
+   (Grok), NVIDIA NIM, Groq, OpenRouter, Anthropic, Mistral, DeepSeek, Together, Perplexity,
+   Cerebras, or any OpenAI-compatible endpoint via a custom base URL - and the app works out which
+   one it is from the key's own shape, or from a dry check that tries the plausible providers in
+   order. Free tiers exist for several of them (Gemini via AI Studio, NVIDIA's 1,000 credits, Groq
+   and OpenRouter's free models); Settings links straight to each console.
+
+   Two rules keep this honest. **Published board data always outranks the model**: AI figures are
+   written first and every published row then overwrites them field by field, so a live pull is
+   never watered down by a model. And **AI-found figures are labelled** - the chip reads `AI •` with
+   the provider and model, the callout says where the numbers came from, the affected issues carry a
+   "Filled by AI search" row, and the model is never allowed to invent an issue that is not already
+   on the board. The key itself is stored on the device (keychain/keystore on iOS and Android) and is
+   sent only to the provider you picked.
+
+### Using your own AI key
+
+Settings -> *Live data key (AI assist)*. Paste a key into the one field - it does not matter which
+vendor it came from, the app reads the key's shape and, if that is ambiguous, tests the plausible
+providers until one accepts it:
+
+| Provider | Key looks like | What you get for free |
+| --- | --- | --- |
+| Google Gemini | `AIza…` / `AQ.…` | free tier in [AI Studio](https://aistudio.google.com/apikey) |
+| OpenAI | `sk-…`, `sk-proj-…` | paid key |
+| xAI (Grok) | `xai-…` | free credits on new accounts |
+| NVIDIA NIM | `nvapi-…` | 1,000 inference credits from [build.nvidia.com](https://build.nvidia.com) |
+| Groq | `gsk_…` | free tier with per-minute limits |
+| OpenRouter | `sk-or-…` | many `:free` models |
+| Anthropic | `sk-ant-…` | paid key (web builds go through the app's proxy) |
+| Mistral / DeepSeek / Together / Perplexity / Cerebras | vendor shapes | free experiment plans where offered |
+| Anything else | your own base URL | point the "Other (OpenAI-compatible)" option at it |
+
+Then, in order:
+
+1. **Save key** - stored in the keychain on iOS/Android (device storage on the web build), shown back
+   as `Google Gemini • AIza…7f2c` so you can tell which key is in place.
+2. **Test this key** - a real request: the model list proves the key authenticates, a one-word prompt
+   proves a model answers, and the result names exactly which one (`gemini-2.5-flash-lite`, say) plus
+   how long it took. A failing key gets the provider's own message and a plain-language hint (wrong
+   key, rate limited, model name retired).
+3. **Dry-run a search** - the same search a blocked refresh would run, reported row by row: how many
+   issues came back, which rows were dropped as unverifiable, and the newest stamp the model reported.
+4. **Refresh with an AI search now**, or just refresh normally: if the boards answer, their figures
+   win; if they cannot be read, the model's figures fill in and are labelled as such.
+
+Model names rot faster than app releases, so nothing is hard-coded: the model list decides, a refused
+model name is swapped for one the key can actually reach, and a provider that does not support web
+search or a search request is retried without it rather than failing.
+
 Honesty is enforced rather than promised:
 
 - The last pull is shown with the **newest upstream stamp** (quote time, not just "now"), so a
   5:30 PM quote and a 12:00 PM quote are never conflated.
 - A failed pull never blocks the UI: the previous pull is restored from storage on the next launch,
   and once the bundled snapshot is a few days old a banner says so.
-- Settings lists each source with its row count and stamp, so it is obvious which board is stale.
+- Settings lists each source with its row count and stamp, so it is obvious which board is stale -
+  and names the provider and model when the AI assist answered instead.
+- Before you rely on a key there are two dry checks in Settings: **Test this key** proves it
+  authenticates and a model actually answers (and reports exactly which one), and **Dry-run a
+  search** proves the figures that come back can be parsed and merged. Both are also runnable from
+  the terminal/CI with `scripts/ai-key-report.ts`.
 - There is no invented premium history: the app shows the recorded quote, the implied listing
   price and a **demand score** computed from that quote and the published subscription multiples.
 - Unconfirmed dates are marked `tentative`, and the UI never claims to predict a listing price.
@@ -136,12 +195,18 @@ Quality gates:
 ```bash
 npm run check:deps   # native dependencies must match the versions Expo SDK 57 ships
 npm run typecheck    # strict TS, app config + node config for scripts/tests
-npm test             # 65 unit tests (tsx --test): data integrity, formatting, analysis, board, reminders, live parsing + merge
+npm test             # 87 unit tests (tsx --test): data integrity, formatting, analysis, board,
+                     # reminders, live parsing + merge, and the AI key layer against fake providers
 npm run board        # prints the board as the app sees it (npm run board -- gmp for the ranking)
 npm run build:web    # static web export into dist/
 npm run smoke        # renders dist/ in jsdom and clicks through the app
-WEB_LIVE_FIXTURES=1 npm run smoke   # same walk, with the captured upstream pages served as the
-                                    # app's own /api/ipoji proxy - asserts the live path end to end
+npm run smoke:live   # (WEB_LIVE_FIXTURES=1) same walk, with the captured upstream pages served as
+                     # the app's own /api/ipoji proxy - asserts the live path end to end
+npm run smoke:ai     # (WEB_AI_FIXTURES=1) the failing-network path: ipoji answers 403, a stubbed
+                     # Gemini answers the key check, and the walk drives the real Settings card -
+                     # paste key, save, test, dry-run, refresh - then asserts the board is labelled AI
+npm run ai:check     # calls every provider endpoint with an invalid key: HTTP 401 is the healthy
+                     # answer, and proves the client maps each provider's refusal into plain words
 ```
 
 The live parsers are tested against trimmed copies of the real upstream markup (same classes, same
@@ -192,7 +257,13 @@ src/lib/
   board.ts                  bucketing, sorting, search/filters, board statistics
   reminders.ts              pure reminder planning (no platform imports — unit tested)
   notifications.ts          expo-notifications glue, lazily loaded on iOS/Android only
-  store.tsx                 watchlist, prefs, alerts, theme, toasts, persistence
+  store.tsx                 watchlist, prefs, alerts, theme, toasts, persistence, live pull + AI fallback
+  ai/providers.ts           the provider registry: key shapes, dialects, defaults, free tiers (no react-native)
+  ai/client.ts              model lists, one prompt, and the dry check that turns a status code into advice
+  ai/extract.ts             the board prompt plus the coercion/plausibility rules every AI row must pass
+  ai/search.ts              aiBoardSearch(): prompt -> reply -> believable rows -> the same merge as the pages
+  ai/keystore.ts            keychain on iOS/Android, device storage on web
+  ai/settings.tsx           what the user saved, the two dry checks, and useAi() for the Settings card
 src/components/             UI kit (ui.tsx), charts, IPO card, timeline, segmented control, header
 src/screens/                the six screens listed above
 scripts/
@@ -200,11 +271,14 @@ scripts/
   web-smoke.ts              jsdom end-to-end test over dist/ or the Metro dev bundle
   android-release.mjs       release plumbing: ABIs, Gradle heap, keystore signing
   live-report.ts            pulls the real boards through the parser code and prints the result (CI)
+  ai-key-report.ts          dry-checks a provider key, or every endpoint without one (CI / terminal)
 api/ipoji.js                same-origin proxy so the web build can read the boards too
+api/ai.js                   same-origin proxy for provider calls from the web build (host allowlist)
 .github/workflows/
   android-apk.yml           builds the shareable APK and publishes the Release
   verify-apk.yml            re-checks a published APK (ABIs, bundle, apksigner)
   live-parse.yml            runs the parsers against the live boards and reports into a check run
+  ai-check.yml              dry-checks the AI providers from a runner (keyless, plus AI_KEY if set)
 ```
 
 ### Design notes

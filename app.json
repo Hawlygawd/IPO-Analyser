@@ -2,7 +2,7 @@
   "expo": {
     "name": "IPO Pulse",
     "slug": "ipo-pulse",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "ipopulse",
@@ -15,7 +15,7 @@
     },
     "android": {
       "package": "com.ipopulse.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#0B7A54",
         "foregroundImage": "./assets/android-icon-foreground.png",

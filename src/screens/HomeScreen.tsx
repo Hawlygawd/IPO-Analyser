@@ -65,7 +65,29 @@ export function HomeScreen({ theme }: { theme: Theme }) {
         </Animated.View>
       ) : null}
 
-      {live.state !== 'live' && age.stale ? (
+      {live.state === 'ai' && live.fetchedAt ? (
+        <Animated.View
+          entering={FadeIn.duration(240)}
+          style={[styles.callout, { backgroundColor: theme.infoSoft, borderColor: theme.border }]}
+        >
+          <Ionicons name="sparkles-outline" size={17} color={theme.info} />
+          <Text style={{ flex: 1, fontSize: 11.5, color: theme.textSub, lineHeight: 16 }}>
+            <Text style={{ fontWeight: '800', color: theme.text }}>
+              Live web search{live.ai ? ` by ${live.ai.providerLabel} • ${live.ai.model}` : ''}.{' '}
+            </Text>
+            The IPO Ji boards could not be read on this network, so your saved key searched the web for the
+            latest figures{live.ai?.used ? ` (${live.ai.rows} rows` : ' ('}
+            {live.updated > 0 ? `, ${live.updated} figure${live.updated === 1 ? '' : 's'} updated` : ''}). Newest
+            reported stamp {boardAsOfLabel}. AI-found figures are labelled throughout - double-check them on the
+            source page before you bid.
+          </Text>
+          <Pressable onPress={refresh} accessibilityRole="button" accessibilityLabel="Search the web again">
+            <Text style={{ fontSize: 11.5, fontWeight: '800', color: theme.primary }}>Again</Text>
+          </Pressable>
+        </Animated.View>
+      ) : null}
+
+      {live.state !== 'live' && live.state !== 'ai' && age.stale ? (
         <Animated.View
           entering={FadeIn.duration(240)}
           style={[styles.callout, { backgroundColor: theme.warnSoft, borderColor: theme.border }]}
@@ -280,7 +302,9 @@ export function HomeScreen({ theme }: { theme: Theme }) {
         ListFooterComponent={
           <Text style={[styles.footer, { color: theme.textMuted }]}>
             {live.fetchedAt
-              ? `Fetched from IPO Ji at ${formatIstTime(live.fetchedAt)} IST - figures move intraday.`
+              ? `${live.state === 'ai' ? 'Filled by an AI web search' : 'Fetched from IPO Ji'} at ${formatIstTime(
+                  live.fetchedAt
+                )} IST - figures move intraday.`
               : 'Indicative data from public trackers'}{' '}
             • grey market premiums are unofficial • not investment advice.
           </Text>

@@ -188,6 +188,19 @@ jobs:
           Settings screen lists each source with its row count and stamp, and issues that only
           exist live (a new SME opening, for example) are added to the board automatically.
 
+          **New in 1.3.0 - your own AI key, for when the boards are unreachable.** Some networks
+          and carriers cannot reach the boards at all. Settings now takes an API key from any of
+          Gemini, OpenAI, xAI (Grok), NVIDIA, Groq, OpenRouter, Claude, Mistral, DeepSeek, Together,
+          Perplexity, Cerebras or any OpenAI-compatible endpoint: paste it, save it (it goes to the
+          device keychain, never to us), then use the two dry checks - **Test this key** proves the
+          key authenticates and names the model that answered, and **Dry-run a search** proves the
+          figures that come back can be merged. From then on, whenever a refresh cannot read the
+          boards, the app searches the web with your key instead.
+
+          AI-found figures are always labelled: the chip reads **AI · 6:24 PM**, the callout names
+          the provider and model, the affected issues show "Filled by AI search", and published
+          board data always outranks the model - so a working board pull is never watered down.
+
           **Install on a phone:** open this page on the device, tap the .apk under Assets, then allow
           installs from this source when Android asks. Android 7.0 (API 24) or newer; 64-bit and
           32-bit ARM are both included.
@@ -202,6 +215,6 @@ jobs:
             gh release edit "$TAG" --notes-file release-notes.md
           else
             gh release create "$TAG" "ipo-pulse-${VERSION}.apk" "ipo-pulse-${VERSION}.apk.sha256" \
-              --title "IPO Pulse ${VERSION} - Android APK" \
+              --title "IPO Pulse ${VERSION} - Android APK (live + AI key)" \
               --notes-file release-notes.md
           fi

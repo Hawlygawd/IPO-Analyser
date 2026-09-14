@@ -30,6 +30,13 @@ const OUT = process.env.WEB_EXPORT_DIR ?? 'dist';
  * the real pages.
  */
 const LIVE_FIXTURES = process.env.WEB_LIVE_FIXTURES === '1';
+/**
+ * The failing-network path: ipoji.com answers 403 (which is what a phone on a blocked or
+ * filtered network sees), while a stubbed Gemini endpoint answers the key check and a board
+ * search. The run then drives the real Settings card - paste key, save, test, dry-run,
+ * refresh - so the whole bring-your-own-key journey is proven inside the shipped bundle.
+ */
+const AI_FIXTURES = process.env.WEB_AI_FIXTURES === '1';
 
 /** Dev-only noise that is expected and harmless. */
 const WARNING_ALLOWLIST = [
@@ -193,6 +200,51 @@ async function main() {
       const text = fixtureFor(String(url));
       if (!text) return { ok: false, status: 404, text: async () => '' };
       return { ok: true, status: 200, text: async () => text };
+    };
+  }
+
+  if (AI_FIXTURES) {
+    const json = (payload: unknown, status = 200) => ({
+      ok: status >= 200 && status < 300,
+      status,
+      text: async () => JSON.stringify(payload),
+    });
+    // what a model with web search would hand back for three issues on the bundled board
+    const AI_ROWS = [
+      { name: 'Veegaland Developers', gmp: 22, subscriptionTotal: 2.41, asOf: '2026-09-14T17:54:00+05:30' },
+      { name: 'Hero Motors', gmp: 24, subscriptionTotal: 2.35, asOf: '2026-09-14T17:54:00+05:30' },
+      { name: 'Kanohar Electricals', gmp: 231, asOf: '2026-09-14T17:50:00+05:30' },
+    ];
+    /** Answers one provider or board request, wherever it arrived from. */
+    const route = (target: string, sent: string) => {
+      if (target.includes('ipoji.com') || target.includes('/api/ipoji')) {
+        return { ok: false, status: 403, text: async () => '<html><body>blocked</body></html>' };
+      }
+      if (target.includes('generativelanguage.googleapis.com')) {
+        if (/\/models(\?|$)/.test(target)) {
+          return json({
+            models: [
+              { name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] },
+              { name: 'models/gemini-2.5-flash-lite', supportedGenerationMethods: ['generateContent'] },
+              { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] },
+            ],
+          });
+        }
+        const text = /Reply with exactly: OK/.test(sent) ? 'OK' : JSON.stringify(AI_ROWS);
+        return json({ candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP' }] });
+      }
+      return { ok: false, status: 404, text: async () => '{"error":{"message":"no such endpoint"}}' };
+    };
+
+    // the web build calls providers through the app's own /api/ai route, so the stub has to
+    // unwrap that request exactly like the real Vercel function does
+    (window as any).fetch = async (url: unknown, init?: { body?: string }) => {
+      const target = String(url);
+      if (target.includes('/api/ai')) {
+        const payload = JSON.parse(String(init?.body ?? '{}')) as { url?: string; body?: string };
+        return route(String(payload.url ?? ''), String(payload.body ?? ''));
+      }
+      return route(target, String(init?.body ?? ''));
     };
   }
 
@@ -449,6 +501,69 @@ async function main() {
     'switching to the dark theme did not apply the dark background'
   );
   assert.ok(!/Something went wrong/.test(textOf('#root')), 'the error boundary tripped while switching themes');
+
+  if (AI_FIXTURES) {
+    /* ------------------------------------------- bring-your-own-key journey */
+    // the settings card is already on screen from the block above (dark theme)
+    press('Light theme');
+    await settle(400);
+    const keyCard = textOf('#root');
+    assert.match(keyCard, /Live data key \(AI assist\)/, 'settings: the live data key card is missing');
+    assert.match(keyCard, /Test this key/, 'the dry-check button is missing');
+    assert.match(keyCard, /Get a Google Gemini key/, 'the free-tier links are missing');
+
+    // paste a key exactly as a user would, through the real input
+    const keyInput = window.document.querySelector('input[aria-label="API key"]') as HTMLInputElement | null;
+    assert.ok(keyInput, 'the API key field did not render');
+    const setNativeValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    setNativeValue.call(keyInput, 'AIzaSyDSmokeFixtureKey0000000000000000');
+    keyInput!.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await settle(300);
+    press('Save key');
+    await settle(500);
+    assert.match(textOf('#root'), /AIza…0000/, 'the saved key was not shown back');
+    assert.match(textOf('#root'), /Detected as/, 'the key shape was not reported');
+
+    // dry check 1: does the key authenticate and answer?
+    press('Test this key');
+    await settle(1200);
+    const tested = textOf('#root');
+    assert.match(tested, /Key works - Google Gemini/, `the key check did not pass:\n${tested.slice(0, 600)}`);
+    assert.match(tested, /key accepted/, `the check did not report the model list step; tail: ${tested.slice(-900)}`);
+
+    // dry check 2: does a search actually return figures this app can merge?
+    press('Dry-run a search');
+    await settle(1500);
+    assert.match(textOf('#root'), /Search works - 3 rows from Google Gemini/, 'the dry search did not return rows');
+
+    // and now the real thing: a refresh that uses the key because the boards are blocked
+    press('Refresh with an AI search now');
+    await settle(1500);
+    assert.match(
+      textOf('#root'),
+      /Last refresh: 3 rows from Google Gemini/,
+      'the forced AI refresh did not record what it used'
+    );
+
+    press('IPOs');
+    await settle(600);
+    const aiBoard = textOf('#root');
+    assert.match(aiBoard, /AI • /, 'the AI chip did not render after an AI-backed refresh');
+    assert.match(aiBoard, /Live web search/, 'the AI callout did not explain where the figures came from');
+    assert.match(aiBoard, /\+₹22/, 'an AI-found premium did not reach the board');
+    assert.match(aiBoard, /2\.41x/, 'an AI-found subscription figure did not reach the card');
+
+    // ... and the detail screen must say the figures came from an AI search
+    const veegaland = find('Veegaland Developers, ', false);
+    assert.ok(veegaland, 'the AI-updated IPO is missing from the board');
+    tap(veegaland!);
+    await settle(700);
+    const aiDetail = textOf('#root');
+    assert.match(aiDetail, /Filled by AI search/, 'the detail screen did not label AI-filled figures');
+    assert.match(aiDetail, /AI web search via Google Gemini/, 'the source row still claims the boards');
+    press('Go back');
+    await settle(500);
+  }
 
   assert.equal(errors.length, 0, `runtime errors:\n${errors.join('\n')}`);
   assert.equal(warnings.length, 0, `warnings that should have been fixed:\n${warnings.join('\n')}`);

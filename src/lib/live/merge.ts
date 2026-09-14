@@ -15,6 +15,7 @@
 import { IPO, Platform, Segment, MilestoneKey } from '../types';
 import { addDays, parseISO } from '../format';
 import type {
+  LiveAiRow,
   LiveCalendarDay,
   LiveCalendarEvent,
   LiveCard,
@@ -23,7 +24,7 @@ import type {
   ParsedLive,
 } from './parse';
 
-export type LiveSourceKey = 'gmp' | 'subscription' | 'calendar' | 'cards';
+export type LiveSourceKey = 'gmp' | 'subscription' | 'calendar' | 'cards' | 'ai';
 
 export interface LiveSourceStatus {
   key: LiveSourceKey;
@@ -32,6 +33,8 @@ export interface LiveSourceStatus {
   asOf?: string;
   rows?: number;
   error?: string;
+  /** who answered (the AI assist names the provider and model here) */
+  note?: string;
 }
 
 export interface LiveBoard {
@@ -44,6 +47,8 @@ export interface LiveBoard {
   updated: number;
   /** issues this pull discovered that the bundled snapshot did not carry */
   added: number;
+  /** issues whose figures came from the AI assist rather than from the boards */
+  aiApplied: number;
 }
 
 export const SOURCE_LABELS: Record<LiveSourceKey, string> = {
@@ -51,6 +56,7 @@ export const SOURCE_LABELS: Record<LiveSourceKey, string> = {
   subscription: 'Live subscription report',
   calendar: 'Event calendar',
   cards: 'Current & upcoming issues',
+  ai: 'AI web search',
 };
 
 /* --------------------------------------------------------------- matching */
@@ -127,6 +133,8 @@ interface LiveRow {
   gmp?: LiveGmpParse['rows'][number];
   sub?: LiveSubscriptionRow;
   card?: LiveCard;
+  /** figures the AI assist found; the lowest-precedence source by design */
+  ai?: LiveAiRow;
   events: LiveCalendarEvent[];
 }
 
@@ -162,6 +170,14 @@ export function mergeBoard(
     if (ipo) rowFor(ipo).card = card;
   }
 
+  // The AI assist only ever fills gaps on issues the board already carries: a name match
+  // against the bundled ids. Rows it cannot match are ignored rather than guessed at,
+  // because a model can be wrong about which issue a figure belongs to.
+  for (const row of live.ai.rows) {
+    const ipo = match(row.id ?? '', row.name);
+    if (ipo) rowFor(ipo).ai = row;
+  }
+
   for (const day of live.calendar) {
     for (const event of day.events) {
       if (event.status === 'HOLIDAY') continue; // market holidays are not IPO milestones
@@ -172,10 +188,12 @@ export function mergeBoard(
 
   let updated = 0;
   let added = 0;
+  let aiApplied = 0;
   const board = bundled.map((ipo) => {
     const row = rows.get(ipo.id);
     if (!row) return ipo;
     const next = applyLive(ipo, row);
+    if (next.aiFilled && !ipo.aiFilled) aiApplied += 1;
     if (!sameIpo(ipo, next)) updated += 1;
     return next;
   });
@@ -215,6 +233,7 @@ export function mergeBoard(
   const stamps = [
     live.gmp.asOf,
     live.subscription.asOf,
+    live.ai.asOf,
     ...board.map((ipo) => ipo.gmpUpdated),
   ].filter((value): value is string => Boolean(value));
   const asOf = stamps.length
@@ -228,20 +247,74 @@ export function mergeBoard(
     sources: meta.sources,
     updated,
     added,
+    aiApplied,
   };
 }
 
 function applyLive(ipo: IPO, row: LiveRow): IPO {
   const next: IPO = { ...ipo, subscription: ipo.subscription ? { ...ipo.subscription } : undefined };
+  // which figures the AI assist actually changed; anything a published row overwrites below
+  // is dropped again, so `aiFilled` never claims credit for board data
+  const byAi = new Set<'gmp' | 'band' | 'subscription' | 'dates'>();
 
+  if (row.ai) {
+    const ai = row.ai;
+    if (ai.gmp !== undefined) {
+      if (ai.gmp !== ipo.gmp) byAi.add('gmp');
+      next.gmp = ai.gmp;
+    }
+    if (ai.gmpUpdated) next.gmpUpdated = ai.gmpUpdated;
+    if (ai.bandLow !== undefined) {
+      if (ai.bandLow !== ipo.priceBandLow) byAi.add('band');
+      next.priceBandLow = ai.bandLow;
+    }
+    if (ai.bandHigh !== undefined) {
+      if (ai.bandHigh !== ipo.priceBandHigh) byAi.add('band');
+      next.priceBandHigh = ai.bandHigh;
+    }
+    if (ai.openDate) {
+      if (ai.openDate !== ipo.openDate) byAi.add('dates');
+      next.openDate = ai.openDate;
+    }
+    if (ai.closeDate) {
+      if (ai.closeDate !== ipo.closeDate) byAi.add('dates');
+      next.closeDate = ai.closeDate;
+    }
+    if (ai.subscriptionTotal !== undefined) {
+      if (ai.subscriptionTotal !== ipo.subscription?.total) byAi.add('subscription');
+      next.subscription = {
+        ...next.subscription,
+        total: ai.subscriptionTotal,
+        asOf: next.subscription?.asOf ?? (ai.subscriptionAsOf ? istLabel(ai.subscriptionAsOf) : undefined),
+      };
+    }
+    if (ai.sourceUrl) next.aiSourceUrl = ai.sourceUrl;
+    next.aiFilled = byAi.size > 0;
+  }
+
+  // Everything below is published board data, so it wins over the AI assist on every field
+  // it carries - including a row that says "no quote recorded", which clears a stale value.
   if (row.gmp) {
     const gmp = row.gmp;
     next.gmp = gmp.gmp;
     next.gmpUpdated = gmp.gmp !== undefined ? gmp.updatedAt ?? ipo.gmpUpdated : undefined;
-    if (gmp.bandLow !== undefined) next.priceBandLow = gmp.bandLow;
-    if (gmp.bandHigh !== undefined) next.priceBandHigh = gmp.bandHigh;
-    if (gmp.openDate) next.openDate = gmp.openDate;
-    if (gmp.closeDate) next.closeDate = gmp.closeDate;
+    byAi.delete('gmp');
+    if (gmp.bandLow !== undefined) {
+      next.priceBandLow = gmp.bandLow;
+      byAi.delete('band');
+    }
+    if (gmp.bandHigh !== undefined) {
+      next.priceBandHigh = gmp.bandHigh;
+      byAi.delete('band');
+    }
+    if (gmp.openDate) {
+      next.openDate = gmp.openDate;
+      byAi.delete('dates');
+    }
+    if (gmp.closeDate) {
+      next.closeDate = gmp.closeDate;
+      byAi.delete('dates');
+    }
     if (gmp.platform) next.platform = gmp.platform as Platform;
     if (gmp.segment) next.segment = gmp.segment as Segment;
   }
@@ -260,6 +333,7 @@ function applyLive(ipo: IPO, row: LiveRow): IPO {
       total: row.sub.total ?? next.subscription?.total,
       asOf: row.sub.updatedAt ? istLabel(row.sub.updatedAt) : next.subscription?.asOf,
     };
+    if (row.sub.total !== undefined) byAi.delete('subscription');
     if (row.sub.platform) next.platform = row.sub.platform as Platform;
   }
 
@@ -273,8 +347,14 @@ function applyLive(ipo: IPO, row: LiveRow): IPO {
     if (key === 'allotment') next.allotmentDate = date;
     if (key === 'listing') next.listingDate = date;
     tentative.delete(key);
+    byAi.delete('dates');
   }
   next.tentativeDates = [...tentative];
+
+  if (byAi.size === 0) {
+    next.aiFilled = undefined;
+    next.aiSourceUrl = undefined;
+  }
 
   return next;
 }
@@ -374,6 +454,7 @@ function sameIpo(a: IPO, b: IPO): boolean {
     'listingDate',
     'platform',
     'segment',
+    'aiFilled',
   ];
   if (fields.some((field) => a[field] !== b[field])) return true;
   const sa = a.subscription ?? {};

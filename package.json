@@ -1,6 +1,6 @@
 {
   "name": "ipo-pulse",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "main": "index.ts",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.14",
@@ -50,7 +50,10 @@
     "build:web": "expo export --platform web --output-dir dist",
     "check:deps": "tsx scripts/check-native-versions.ts",
     "apk": "expo prebuild --platform android --no-install && node scripts/android-release.mjs && cd android && ./gradlew assembleRelease",
-    "smoke": "tsx scripts/web-smoke.ts"
+    "smoke": "tsx scripts/web-smoke.ts",
+    "smoke:ai": "WEB_AI_FIXTURES=1 tsx scripts/web-smoke.ts",
+    "smoke:live": "WEB_LIVE_FIXTURES=1 tsx scripts/web-smoke.ts",
+    "ai:check": "tsx scripts/ai-key-report.ts --keyless"
   },
   "private": true
 }

@@ -5,7 +5,9 @@ import { useStore } from '../lib/store';
 import { DATA_AS_OF_LABEL, DATA_SOURCE_LABEL } from '../lib/ipoData';
 import { formatIstTime, timeAgo } from '../lib/format';
 import { dataAge } from '../lib/analysis';
+import Constants from 'expo-constants';
 import { Button, KeyValueRow, SectionCard } from '../components/ui';
+import { AiKeyCard } from '../components/AiKeyCard';
 import { ScreenHeader } from '../components/ScreenHeader';
 
 const MODES: { key: ThemeMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -217,11 +219,14 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
                   label={source.label}
                   value={
                     source.ok
-                      ? `${source.rows ?? 0} rows${source.asOf ? ` • ${formatIstTime(source.asOf)}` : ''}`
+                      ? `${source.rows ?? 0} rows${source.asOf ? ` • ${formatIstTime(source.asOf)}` : ''}${
+                          source.note ? ` • ${source.note}` : ''
+                        }`
                       : source.error
                         ? `unavailable (${source.error})`
                         : 'unavailable'
                   }
+                  multiline
                 />
               ))
             : null}
@@ -236,10 +241,12 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
             style={{ marginTop: 12 }}
           />
           <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 10, lineHeight: 16 }}>
-            The board ships with the app as a verified snapshot - there is no live feed to poll, so re-checking
-            recomputes every date-dependent value and stamps the time it ran.
+            A refresh downloads the IPO Ji boards and merges today{"'"}s figures over the snapshot that ships with
+            the app. If those boards cannot be reached, {live.ai?.armed ? 'your saved key searches the web instead' : 'add a live data key above to have the app search the web instead'}.
           </Text>
         </SectionCard>
+
+        <AiKeyCard theme={theme} />
 
         <SectionCard theme={theme} title="Sources" style={{ marginTop: 14 }}>
           {SOURCES.map((source) => (
@@ -287,11 +294,22 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
               and consider a SEBI-registered adviser.
             </Text>
           </View>
-          <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 12 }}>Version 1.1.0</Text>
+          <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 12 }}>
+            Version {appVersion()} • live boards{live.ai?.used ? ' + AI web search' : ''}
+          </Text>
         </SectionCard>
       </ScrollView>
     </View>
   );
+}
+
+/** The running version, straight from app.json - it must never drift from the build again. */
+function appVersion(): string {
+  try {
+    return Constants.expoConfig?.version ?? '1.3.0';
+  } catch {
+    return '1.3.0';
+  }
 }
 
 const styles = StyleSheet.create({

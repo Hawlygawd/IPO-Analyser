@@ -14,11 +14,18 @@ import { ThemeMode } from '../theme';
 import { darkTheme, lightTheme, Theme } from '../theme';
 import { IPOT, DATA_AS_OF, DATA_AS_OF_LABEL } from './ipoData';
 import {
+  failedSourceStatuses,
+  mergeBoard,
   pullLiveBoard,
   istLabel,
   type LiveBoard,
   type LiveSourceStatus,
+  emptyParsedLive,
+  type ParsedLive,
 } from './live';
+import { aiBoardSearch, aiSourceStatus, aiIdleStatus, type AiSearchResult } from './ai/search';
+import { whenAiReady } from './ai/settings';
+import { providerSpec } from './ai/providers';
 import {
   buildReminders,
   cancelIds,
@@ -38,7 +45,24 @@ const KEY_CHECKED = '@ipo_pulse/last_checked';
 const KEY_LIVE = '@ipo_pulse/live';
 
 export type PermissionState = 'granted' | 'denied' | 'undetermined' | 'unsupported';
-export type LiveState = 'idle' | 'loading' | 'live' | 'offline';
+export type LiveState = 'idle' | 'loading' | 'live' | 'ai' | 'offline';
+
+/** What the AI assist did on the last pull. */
+export interface AiPullInfo {
+  /** true when at least one figure on the board came from the model */
+  used: boolean;
+  /** a key is saved and enabled, whether or not it was needed */
+  armed: boolean;
+  providerLabel: string;
+  model: string;
+  /** rows the model returned */
+  rows: number;
+  /** rows that could not be believed and were dropped */
+  rejected: number;
+  search: boolean;
+  note: string | null;
+  error: string | null;
+}
 
 export interface LiveInfo {
   state: LiveState;
@@ -52,6 +76,8 @@ export interface LiveInfo {
   /** issues the last pull discovered */
   added: number;
   sources: LiveSourceStatus[];
+  /** the AI assist's part in this pull, null when no key is saved */
+  ai: AiPullInfo | null;
 }
 export type ToastTone = 'info' | 'up' | 'down' | 'warn';
 
@@ -92,6 +118,8 @@ interface StoreValue {
   alerts: AlertLogItem[];
   clearAlerts: () => Promise<void>;
   refresh: () => Promise<void>;
+  /** forces the AI assist to search even when the boards answered */
+  refreshWithAi: () => Promise<void>;
   toast: Toast | null;
   showToast: (message: string, tone?: ToastTone) => void;
   dismissToast: () => void;
@@ -131,6 +159,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [liveUpdated, setLiveUpdated] = useState(0);
   const [liveAdded, setLiveAdded] = useState(0);
   const [liveSources, setLiveSources] = useState<LiveSourceStatus[]>([]);
+  const [liveAi, setLiveAi] = useState<AiPullInfo | null>(null);
 
   // refs mirror the state the async notification code needs to read
   const notifIds = useRef<Record<string, string[]>>({});
@@ -218,7 +247,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (map[KEY_CHECKED]) setLastChecked(Number(map[KEY_CHECKED]) || Date.now());
         if (map[KEY_LIVE]) {
           // last successful pull: show it immediately, the network call below replaces it
-          const cached = JSON.parse(map[KEY_LIVE]) as LiveBoard;
+          const cached = JSON.parse(map[KEY_LIVE]) as LiveBoard & { ai?: AiPullInfo | null };
           if (Array.isArray(cached?.ipos) && cached.ipos.length > 0 && cached.fetchedAt) {
             boardRef.current = cached.ipos;
             liveFetchedRef.current = cached.fetchedAt;
@@ -228,7 +257,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             setLiveUpdated(cached.updated ?? 0);
             setLiveAdded(cached.added ?? 0);
             setLiveSources(cached.sources ?? []);
-            setLiveState('live');
+            // remember whether the figures on screen came from the boards or from the AI assist
+            if (cached.ai) setLiveAi(cached.ai);
+            setLiveState(cached.ai?.used && (cached.ai.rows ?? 0) > 0 ? 'ai' : 'live');
           }
         }
       } catch {
@@ -443,16 +474,104 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [persist]);
 
   /**
-   * Pulls the four upstream pages, merges them over the snapshot and caches the result.
-   * `silent` is used for the boot/foreground refresh: it never interrupts with a toast.
+   * Pulls the upstream boards, merges them over the snapshot and caches the result.
+   *
+   * When a board pull fails or comes back with no quotes - the usual sign that the site is
+   * blocking this network or has changed shape - and the user has saved an API key, the same
+   * refresh asks the AI assist to search the web for the figures. Published board data always
+   * wins over anything the model says (merge.ts enforces it), and `silent` is used for the
+   * boot/foreground refresh so it never interrupts with a toast.
    */
   const pullLive = useCallback(
-    async (silent: boolean): Promise<boolean> => {
+    async (silent: boolean, options: { forceAi?: boolean } = {}): Promise<boolean> => {
       if (pullingRef.current) return false;
       pullingRef.current = true;
       setLiveState('loading');
+      const useProxy = Platform.OS === 'web';
       try {
-        const { board: next } = await pullLiveBoard(IPOT, { useProxy: Platform.OS === 'web' });
+        // the keychain read may still be in flight during the boot pull
+        const ai = await whenAiReady(4000);
+        const armed = Boolean(ai.key && ai.enabled);
+
+        let direct: Awaited<ReturnType<typeof pullLiveBoard>> | null = null;
+        let directError: string | null = null;
+        try {
+          direct = await pullLiveBoard(IPOT, { useProxy });
+        } catch (error) {
+          directError = error instanceof Error ? error.message : String(error);
+        }
+
+        // Ask the model only when it is worth a request: the boards failed, or they answered
+        // without a single premium or subscription figure to show.
+        const thin =
+          !direct ||
+          (direct.parsed.gmp.rows.length === 0 && direct.parsed.subscription.rows.length === 0);
+        let search: AiSearchResult | null = null;
+        if (armed && (thin || options.forceAi)) {
+          search = await aiBoardSearch(IPOT, {
+            key: ai.key ?? '',
+            providerId: ai.providerId,
+            model: ai.model,
+            baseUrl: ai.baseUrl,
+            search: true,
+            useProxy,
+          });
+        }
+
+        if (!direct && !search?.ok) {
+          throw new Error(search?.error ?? directError ?? 'no data in the upstream pages');
+        }
+
+        const fetchedAt = Date.now();
+        const parsed: ParsedLive = direct
+          ? {
+              ...direct.parsed,
+              ai: search?.ok
+                ? { rows: search.rows, asOf: search.asOf, rejected: search.rejected }
+                : { rows: [] },
+            }
+          : emptyParsedLive(
+              search?.ok
+                ? { rows: search.rows, asOf: search.asOf, rejected: search.rejected }
+                : { rows: [] }
+            );
+
+        const aiInfo: AiPullInfo | null = search
+          ? {
+              used: search.ok && parsed.ai.rows.length > 0,
+              armed,
+              providerLabel: search.providerLabel,
+              model: search.model,
+              rows: search.rows.length,
+              rejected: search.rejected,
+              search: search.search,
+              note: search.hint ?? null,
+              error: search.ok ? null : (search.error ?? null),
+            }
+          : armed
+            ? {
+                used: false,
+                armed: true,
+                providerLabel: providerSpec(ai.providerId).label,
+                model: ai.model ?? providerSpec(ai.providerId).modelFallback,
+                rows: 0,
+                rejected: 0,
+                search: false,
+                note: 'armed - used only when the boards fail',
+                error: null,
+              }
+            : null;
+
+        const sources: LiveSourceStatus[] = [
+          ...(search
+            ? [aiSourceStatus(search)]
+            : armed && aiInfo
+              ? [aiIdleStatus(`${aiInfo.providerLabel} • ${aiInfo.model} ${aiInfo.note ?? ''}`.trim())]
+              : []),
+          ...(direct ? direct.board.sources : failedSourceStatuses(directError ?? 'unreachable')),
+        ];
+
+        const next = mergeBoard(IPOT, parsed, { fetchedAt, sources });
         boardRef.current = next.ipos;
         liveFetchedRef.current = next.fetchedAt;
         setBoard(next.ipos);
@@ -461,28 +580,38 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setLiveUpdated(next.updated);
         setLiveAdded(next.added);
         setLiveSources(next.sources);
-        setLiveError(null);
-        setLiveState('live');
+        setLiveAi(aiInfo);
+        setLiveError(direct ? null : directError);
+        setLiveState(direct ? 'live' : 'ai');
         setBoardVersion((version) => version + 1);
         const at = Date.now();
         setLastChecked(at);
         persist(KEY_CHECKED, at);
-        persist(KEY_LIVE, next);
+        // the cache carries the AI note too, so a relaunch keeps saying where the figures came from
+        persist(KEY_LIVE, { ...next, ai: aiInfo });
+
         if (!silent) {
           const parts = [
-            `Live data • ${istLabel(next.asOf)}`,
+            direct ? `Live data • ${istLabel(next.asOf)}` : `AI web search • ${istLabel(next.asOf)}`,
             next.updated > 0 ? `${next.updated} updated` : 'no figure moved',
             next.added > 0 ? `${next.added} new` : null,
+            aiInfo?.used ? `${aiInfo.rows} from ${aiInfo.providerLabel}` : null,
           ].filter(Boolean);
-          showToast(parts.join(' • '), 'up');
+          showToast(parts.join(' • '), direct ? 'up' : 'info');
           logAlert({
             ipoId: '-',
             ipoName: 'Live update',
             kind: 'system',
-            title: `Board refreshed from IPO Ji`,
-            body: `${next.updated} of ${next.ipos.length} issues changed, ${next.added} new. Newest upstream stamp ${istLabel(
-              next.asOf
-            )}.`,
+            title: direct ? 'Board refreshed from IPO Ji' : 'Board refreshed by AI web search',
+            body: direct
+              ? `${next.updated} of ${next.ipos.length} issues changed, ${next.added} new. Newest upstream stamp ${istLabel(
+                  next.asOf
+                )}.`
+              : `The IPO Ji boards could not be read (${directError ?? 'no rows'}), so ${
+                  aiInfo?.providerLabel ?? 'your key'
+                } searched the web: ${next.updated} of ${next.ipos.length} issues changed. Newest stamp ${istLabel(
+                  next.asOf
+                )}.`,
           });
         }
         return true;
@@ -516,6 +645,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     setRefreshing(false);
   }, [persist, pullLive]);
+
+  /** Same refresh, but the AI assist searches even when the boards answered (spends one request). */
+  const refreshWithAi = useCallback(async () => {
+    setRefreshing(true);
+    await pullLive(false, { forceAi: true });
+    setRefreshing(false);
+  }, [pullLive]);
 
   /** First pull after boot, then one per foreground return when the data has aged. */
   useEffect(() => {
@@ -557,8 +693,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       updated: liveUpdated,
       added: liveAdded,
       sources: liveSources,
+      ai: liveAi,
     }),
-    [boardAsOf, liveAdded, liveError, liveFetchedAt, liveSources, liveState, liveUpdated]
+    [boardAsOf, liveAdded, liveAi, liveError, liveFetchedAt, liveSources, liveState, liveUpdated]
   );
 
   const boardAsOfLabel = liveFetchedAt ? istLabel(boardAsOf) : DATA_AS_OF_LABEL;
@@ -590,6 +727,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       alerts,
       clearAlerts,
       refresh,
+      refreshWithAi,
       toast,
       showToast,
       dismissToast,

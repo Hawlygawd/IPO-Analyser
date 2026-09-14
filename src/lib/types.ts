@@ -40,6 +40,13 @@ export interface IPO {
   /** ISO timestamp of the last recorded GMP quote */
   gmpUpdated?: string;
   subscription?: SubscriptionSplit;
+  /**
+   * True when at least one figure on this issue came from the AI assist rather than from a
+   * published page - the UI says so instead of passing it off as board data.
+   */
+  aiFilled?: boolean;
+  /** the page an AI-assisted figure was taken from, when the model named one */
+  aiSourceUrl?: string;
   about: string;
   sourceName: string;
   sourceUrl: string;

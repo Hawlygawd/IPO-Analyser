@@ -62,13 +62,17 @@ jobs:
             echo "$SIGNATURE" | sed 's/^/  /'
             echo
             echo "manifest:"
-            "$AAPT2" dump badging "$APK" 2>/dev/null | grep -E "^package|^sdkVersion|^targetSdkVersion|^launchable-activity|^application-label:" | sed 's/^/  /' || echo "  (aapt2 unavailable)"
+            # uses-permission matters here: without INTERNET the app installs and then silently
+            # fails every live pull, which is exactly the bug this report has to be able to see
+            "$AAPT2" dump badging "$APK" 2>/dev/null | grep -E "^package|^sdkVersion|^targetSdkVersion|^launchable-activity|^application-label:|^uses-permission" | sed 's/^/  /' || echo "  (aapt2 unavailable)"
           } | tee apk-report.txt
 
           fail=0
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/' || { echo "MISSING arm64-v8a native libraries"; fail=1; }
           unzip -l "$APK" | grep -q 'lib/armeabi-v7a/' || { echo "MISSING armeabi-v7a native libraries"; fail=1; }
           unzip -l "$APK" | grep -q 'assets/index.android.bundle' || { echo "MISSING the JavaScript bundle - the app would not start"; fail=1; }
+          "$AAPT2" dump badging "$APK" 2>/dev/null | grep -q "uses-permission: name='android.permission.INTERNET'" ||
+            { echo "MISSING the INTERNET permission - every live pull would fail silently"; fail=1; }
           "$APKSIGNER" verify "$APK" >/dev/null || { echo "the APK signature does not verify - Android would refuse it"; fail=1; }
           test "$fail" = 0 || exit 1
           echo "the published APK is complete and its signature verifies"
