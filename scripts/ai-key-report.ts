@@ -52,7 +52,9 @@ async function keyless(): Promise<void> {
     const verdict =
       listed.status === 401 || listed.status === 403
         ? 'reachable (rejects the fake key)'
-        : listed.ok && spec.listsModels
+        : errorHint(listed.status, String(listed.error ?? '')).includes('rejected this key')
+          ? 'reachable (rejects the fake key)'
+          : listed.ok && spec.listsModels
           ? 'reachable (lists models without checking the key)'
           : listed.ok
             ? 'reachable (models listed)'
