@@ -24,6 +24,12 @@ runs on a phone with no Metro, no dev server and no network.
 the phone, tap the `.apk` under Assets, and allow installs from that source when Android asks.
 Android 7.0 (API 24) or newer; the APK carries both 64-bit and 32-bit ARM libraries.
 
+**Check a download:** the *Verify APK* workflow fetches the published asset and asserts the things
+that decide whether it installs and starts - both ARM ABIs, the Hermes bundle, dex code and an
+`apksigner`-verified signature - then reports into a check run. Trigger it with a tag
+(`git tag apk-check-1 && git push origin apk-check-1`); the *Run workflow* button only appears once
+the workflow is on the default branch.
+
 **Build a fresh one:** Actions -> *Android APK* -> *Run workflow*. The run produces the APK as an
 artifact and, with *publish a GitHub Release* ticked, a public download link. The workflow runs
 typecheck + the unit tests before it builds, and takes roughly 10-15 minutes (the first one longer,
