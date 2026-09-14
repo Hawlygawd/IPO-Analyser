@@ -147,20 +147,14 @@ export function mergeBoard(
     return created;
   };
 
-  let gmpMatched = 0;
   for (const row of live.gmp.rows) {
     const ipo = match(row.id, row.name);
-    if (!ipo) continue;
-    gmpMatched += 1;
-    rowFor(ipo).gmp = row;
+    if (ipo) rowFor(ipo).gmp = row;
   }
 
-  let subMatched = 0;
   for (const row of live.subscription.rows) {
     const ipo = match(row.id, row.name);
-    if (!ipo) continue;
-    subMatched += 1;
-    rowFor(ipo).sub = row;
+    if (ipo) rowFor(ipo).sub = row;
   }
 
   for (const card of live.cards) {
@@ -168,13 +162,9 @@ export function mergeBoard(
     if (ipo) rowFor(ipo).card = card;
   }
 
-  const holidayNames = new Set<string>();
   for (const day of live.calendar) {
     for (const event of day.events) {
-      if (event.status === 'HOLIDAY') {
-        holidayNames.add(event.name);
-        continue;
-      }
+      if (event.status === 'HOLIDAY') continue; // market holidays are not IPO milestones
       const ipo = match(event.slug ?? '', event.name);
       if (ipo) rowFor(ipo).events.push(event);
     }
@@ -230,10 +220,6 @@ export function mergeBoard(
   const asOf = stamps.length
     ? new Date(Math.max(...stamps.map((value) => new Date(value).getTime()))).toISOString()
     : new Date(meta.fetchedAt).toISOString();
-
-  void gmpMatched;
-  void subMatched;
-  void holidayNames;
 
   return {
     ipos: [...board, ...discovered],

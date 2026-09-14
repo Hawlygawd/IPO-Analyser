@@ -251,7 +251,7 @@ export function parseGmpPage(html: string): LiveGmpParse {
   const tags = openingTags(html, /<tr\b[^>]*\bclass="[^"]*\bgmp-row\b[^"]*"[^>]*>/);
   const stamps: string[] = [];
 
-  tags.forEach(({ tag, start }, index) => {
+  tags.forEach(({ tag, start }) => {
     const end = html.indexOf('</tr>', start);
     const body = html.slice(start, end === -1 ? html.length : end + 5);
     // the GMP rows link to /ipo-gmp/<slug>, the name cell to /ipo/<slug>
@@ -295,7 +295,6 @@ export function parseGmpPage(html: string): LiveGmpParse {
       updatedAt: updatedAt ? new Date(updatedAt).toISOString() : undefined,
       url: slug ? `https://www.ipoji.com/ipo/${slug}` : undefined,
     });
-    void index;
   });
 
   const asOf = stamps.length
