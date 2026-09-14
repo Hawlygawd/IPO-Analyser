@@ -28,6 +28,7 @@ on:
 
 permissions:
   contents: write
+  checks: write
 
 concurrency:
   group: android-apk-${{ github.ref }}
@@ -89,6 +90,18 @@ jobs:
           REACT_NATIVE_ARCHITECTURES: ${{ inputs.abis || 'arm64-v8a,armeabi-v7a' }}
         run: node scripts/android-release.mjs
 
+      - name: Environment
+        run: |
+          {
+            echo "java: $(java -version 2>&1 | head -1)"
+            echo "node: $(node -v)"
+            echo "ANDROID_HOME: $ANDROID_HOME"
+            echo "ndk: $(ls "$ANDROID_HOME/ndk" 2>/dev/null | tr '\n' ' ')"
+            echo "cmake: $(ls "$ANDROID_HOME/cmake" 2>/dev/null | tr '\n' ' ')"
+            echo "platforms: $(ls "$ANDROID_HOME/platforms" 2>/dev/null | tr '\n' ' ')"
+            echo "build-tools: $(ls "$ANDROID_HOME/build-tools" 2>/dev/null | tr '\n' ' ')"
+          } | tee env-info.txt
+
       - name: Build the release APK
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -97,7 +110,9 @@ jobs:
         # lintVitalRelease is skipped deliberately: it is the only release gate that cannot be
         # rehearsed outside a runner (this sandbox has no JDK) and its fatal checks are static
         # analysis, while typecheck + the unit tests + the jsdom smoke test already gate correctness.
-        run: ./gradlew assembleRelease --no-daemon --stacktrace -x lintVitalRelease
+        run: |
+          set -o pipefail
+          ./gradlew assembleRelease --no-daemon --stacktrace -x lintVitalRelease 2>&1 | tee ../gradle-build.log
         working-directory: android
 
       - name: Inspect the APK
@@ -107,6 +122,26 @@ jobs:
           unzip -l "$APK" | grep -E "lib/|index.android.bundle|classes.dex"
           VERSION="$(node -p "require('./app.json').expo.version")"
           cp "$APK" "ipo-pulse-${VERSION}.apk"
+
+      # Runner logs are served from Azure blob storage, which not every client can reach. Mirror
+      # the tail of the Gradle log into a check run: it comes back through the repository API.
+      - name: Publish the build log
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          {
+            echo "### environment"
+            cat env-info.txt 2>/dev/null || echo "(missing)"
+            echo
+            echo "### gradle"
+            tail -c 60000 gradle-build.log 2>/dev/null || echo "(no gradle log)"
+          } > build-log.md || true
+          jq -Rs '{name: "android-build-log", head_sha: env.SHA, status: "completed", conclusion: "neutral",
+                   output: {title: "Android release build log", summary: .}}' build-log.md > payload.json
+          gh api "repos/${{ github.repository }}/check-runs" -X POST --input payload.json >/dev/null && \
+            echo "published the build log as a check run" || echo "could not publish the build log"
 
       - uses: actions/upload-artifact@v4
         with:
