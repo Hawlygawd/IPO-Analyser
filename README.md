@@ -15,6 +15,51 @@ each issue — plus reminders so a subscription window never slips past.
 | **Reminder log** | The reminders this app queued or delivered, plus the plan that will fire next. |
 | **Settings** | System/light/dark theme, per-milestone reminder switches, data freshness and provenance, source links, and on-device data controls. |
 
+## Install it on Android
+
+The app builds to a standalone APK: the JavaScript bundle and the data snapshot are baked in, so it
+runs on a phone with no Metro, no dev server and no network.
+
+**Grab a build:** [Releases](https://github.com/Hawlygawd/IPO-Analyser/releases) - open the page on
+the phone, tap the `.apk` under Assets, and allow installs from that source when Android asks.
+Android 7.0 (API 24) or newer; the APK carries both 64-bit and 32-bit ARM libraries.
+
+**Build a fresh one:** Actions -> *Android APK* -> *Run workflow*. The run produces the APK as an
+artifact and, with *publish a GitHub Release* ticked, a public download link. The workflow runs
+typecheck + the unit tests before it builds, and takes roughly 10-15 minutes (the first one longer,
+while Gradle warms its caches).
+
+**Locally** (needs JDK 17 + the Android SDK, e.g. Android Studio):
+
+```bash
+npm install
+npm run apk          # prebuild -> prepare sign-off -> gradlew assembleRelease
+```
+
+The APK lands in `android/app/build/outputs/apk/release/`.
+
+### Signing
+
+Android will not install an unsigned APK, so every build is signed:
+
+- **With a key of your own** - add `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+  `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` as repository secrets, and the release build uses
+  that key. Run the workflow once with *generate a signing key* ticked to mint one; the keystore and
+  its password come back as the `release-signing-key` artifact, and the log prints the `base64 -w0`
+  command for the first secret.
+- **Without** - the build keeps the debug key that ships with the Expo template (`android/app/
+  debug.keystore`, md5 `4d3dbe5438b4d52b2707d5c039d09afb`). That installs fine when sideloading and
+  is stable across builds, but Play Store rejects it, and switching between the two keys means
+  uninstalling the app first.
+
+`scripts/android-release.mjs` does the rest of the release plumbing and refuses to continue if a
+patch does not apply: it limits the build to the phone ABIs (`arm64-v8a,armeabi-v7a` - override with
+`REACT_NATIVE_ARCHITECTURES`), raises the Gradle heap for the Reanimated C++ builds, and points the
+release build type at the chosen keystore, detecting JKS vs PKCS#12 from the file's magic bytes.
+
+The generated `android/` folder is not committed - `expo prebuild` recreates it from `app.json`, so
+the icon, package name (`com.ipopulse.app`), version and permissions all stay declarative.
+
 ## Honesty about the data
 
 The board is a **dated snapshot**, not a live feed. Everything shown is what the tracker published
@@ -78,7 +123,12 @@ src/lib/
   store.tsx                 watchlist, prefs, alerts, theme, toasts, persistence
 src/components/             UI kit (ui.tsx), charts, IPO card, timeline, segmented control, header
 src/screens/                the six screens listed above
-scripts/                    board inspector and the jsdom smoke test
+scripts/
+  board-preview.ts          prints the board the way the app sees it
+  web-smoke.ts              jsdom end-to-end test over dist/ or the Metro dev bundle
+  android-release.mjs       release plumbing: ABIs, Gradle heap, keystore signing
+.github/workflows/
+  android-apk.yml           builds the shareable APK and publishes the Release
 ```
 
 ### Design notes

@@ -1,0 +1,148 @@
+name: Android APK
+
+# Builds a shareable, self-contained release APK: the JS bundle and the data snapshot are baked
+# into the APK, so it runs on a phone with no Metro, no dev server and no network.
+#
+# Run it from the Actions tab -> "Android APK" -> "Run workflow". The APK lands in the run's
+# artifacts, and (by default) on a GitHub Release you can link to directly:
+#   https://github.com/Hawlygawd/IPO-Analyser/releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Attach the APK to a GitHub Release (public download link)
+        type: boolean
+        default: true
+      generate_release_key:
+        description: Generate a private signing key (uploaded as an artifact for future builds)
+        type: boolean
+        default: false
+      abis:
+        description: ABIs to include (comma separated)
+        type: string
+        default: arm64-v8a,armeabi-v7a
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Quality gates
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Generate the native Android project
+        run: npx expo prebuild --platform android --no-install
+
+      # Optional: mint a private signing key. Its password is masked in the log and shipped in the
+      # artifact so the key can be moved into repository secrets afterwards.
+      - name: Generate a signing key
+        if: inputs.generate_release_key == true
+        run: |
+          PASSWORD="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)"
+          echo "::add-mask::$PASSWORD"
+          keytool -genkeypair -keystore android/app/release.keystore -storetype PKCS12 \
+            -alias ipopulse -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "$PASSWORD" -keypass "$PASSWORD" \
+            -dname "CN=IPO Pulse, OU=Android, O=IPO Pulse, L=Panipat, ST=Haryana, C=IN"
+          {
+            echo "ANDROID_KEYSTORE_BASE64=$(base64 -w0 android/app/release.keystore)"
+            echo "ANDROID_KEYSTORE_PASSWORD=$PASSWORD"
+            echo "ANDROID_KEY_ALIAS=ipopulse"
+            echo "ANDROID_KEY_PASSWORD=$PASSWORD"
+          } >> "$GITHUB_ENV"
+          printf 'keystore password: %s\nalias: ipopulse\n\nKeep this key private. To reuse it in CI,\nadd these repository secrets:\n  ANDROID_KEYSTORE_BASE64  (base64 -w0 android/app/release.keystore)\n  ANDROID_KEYSTORE_PASSWORD\n  ANDROID_KEY_ALIAS\n  ANDROID_KEY_PASSWORD\n' "$PASSWORD" > signing-key.txt
+
+      - name: Prepare the release build
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          REACT_NATIVE_ARCHITECTURES: ${{ inputs.abis || 'arm64-v8a,armeabi-v7a' }}
+        run: node scripts/android-release.mjs
+
+      - name: Build the release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        working-directory: android
+
+      - name: Inspect the APK
+        run: |
+          APK="$(ls android/app/build/outputs/apk/release/*.apk | head -1)"
+          echo "APK: $APK ($(du -h "$APK" | cut -f1))"
+          unzip -l "$APK" | grep -E "lib/|index.android.bundle|classes.dex"
+          VERSION="$(node -p "require('./app.json').expo.version")"
+          cp "$APK" "ipo-pulse-${VERSION}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipo-pulse-apk
+          path: ipo-pulse-*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.generate_release_key == true
+        with:
+          name: release-signing-key
+          path: |
+            android/app/release.keystore
+            signing-key.txt
+
+      - name: Publish the GitHub Release
+        if: github.event_name == 'push' || inputs.publish_release == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./app.json').expo.version")"
+          TAG="android-v${VERSION}"
+          cat > release-notes.md <<NOTES
+          Standalone Android build of IPO Pulse ${VERSION} (com.ipopulse.app).
+
+          The JavaScript bundle and the market-data snapshot are baked in, so the app runs offline:
+          no dev server, no Arena session, nothing to install first.
+
+          **Install on a phone:** open this page on the device, tap the .apk under Assets, then allow
+          installs from this source when Android asks. Android 7.0 (API 24) or newer; 64-bit and
+          32-bit ARM are both included.
+
+          Built from commit ${GITHUB_SHA} by the [Android APK workflow](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}).
+          NOTES
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "ipo-pulse-${VERSION}.apk" --clobber
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" "ipo-pulse-${VERSION}.apk" \
+              --title "IPO Pulse ${VERSION} - Android APK" \
+              --notes-file release-notes.md
+          fi
