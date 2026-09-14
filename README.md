@@ -136,10 +136,12 @@ Quality gates:
 ```bash
 npm run check:deps   # native dependencies must match the versions Expo SDK 57 ships
 npm run typecheck    # strict TS, app config + node config for scripts/tests
-npm test             # 64 unit tests (tsx --test): data integrity, formatting, analysis, board, reminders, live parsing + merge
+npm test             # 65 unit tests (tsx --test): data integrity, formatting, analysis, board, reminders, live parsing + merge
 npm run board        # prints the board as the app sees it (npm run board -- gmp for the ranking)
 npm run build:web    # static web export into dist/
 npm run smoke        # renders dist/ in jsdom and clicks through the app
+WEB_LIVE_FIXTURES=1 npm run smoke   # same walk, with the captured upstream pages served as the
+                                    # app's own /api/ipoji proxy - asserts the live path end to end
 ```
 
 The live parsers are tested against trimmed copies of the real upstream markup (same classes, same
