@@ -180,8 +180,13 @@ jobs:
           cat > release-notes.md <<NOTES
           Standalone Android build of IPO Pulse ${VERSION} (com.ipopulse.app).
 
-          The JavaScript bundle and the market-data snapshot are baked in, so the app runs offline:
-          no dev server, no Arena session, nothing to install first.
+          The JavaScript bundle and a market-data snapshot are baked in, so the app opens and works
+          with no network at all - and it also pulls the live boards from IPO Ji on launch, on
+          returning to the app, and whenever you pull down to refresh. The header chip says which
+          one you are looking at: **Live · 5:30 PM** (the newest upstream stamp), or **Snapshot**
+          when the boards could not be reached and the bundled figures are shown instead. The
+          Settings screen lists each source with its row count and stamp, and issues that only
+          exist live (a new SME opening, for example) are added to the board automatically.
 
           **Install on a phone:** open this page on the device, tap the .apk under Assets, then allow
           installs from this source when Android asks. Android 7.0 (API 24) or newer; 64-bit and
