@@ -2,7 +2,6 @@ import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from '
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { radius, Theme, ThemeMode } from '../theme';
 import { useStore } from '../lib/store';
-import { DATA_AS_OF_LABEL, DATA_SOURCE_LABEL } from '../lib/ipoData';
 import { formatIstTime, quoteAge, timeAgo } from '../lib/format';
 import { dataAge } from '../lib/analysis';
 import Constants from 'expo-constants';
@@ -17,17 +16,18 @@ const MODES: { key: ThemeMode; label: string; icon: keyof typeof Ionicons.glyphM
 ];
 
 const NOTIF_ROWS: { key: 'openDay' | 'lastDay' | 'allotment' | 'listing'; label: string; hint: string }[] = [
-  { key: 'openDay', label: 'Bidding opens', hint: 'Morning of the opening day, plus a heads-up the evening before' },
-  { key: 'lastDay', label: 'Last day to apply', hint: 'Before bidding closes at 5 PM' },
-  { key: 'allotment', label: 'Allotment day', hint: 'When the basis of allotment is finalised' },
-  { key: 'listing', label: 'Listing day', hint: 'When the shares debut on the exchange' },
+  { key: 'openDay', label: 'Bidding opens', hint: 'Opening morning + the evening before' },
+  { key: 'lastDay', label: 'Last day to apply', hint: 'Before 5 PM close' },
+  { key: 'allotment', label: 'Allotment day', hint: 'Basis of allotment finalised' },
+  { key: 'listing', label: 'Listing day', hint: 'Shares debut' },
 ];
 
+/** Where the published figures come from - one tap each, kept to a single row. */
 const SOURCES = [
-  { label: 'IPO Ji - GMP board, subscription & calendar', url: 'https://www.ipoji.com/ipo-gmp' },
-  { label: 'NSE - current issues', url: 'https://www.nseindia.com/market-data/all-upcoming-issues-ipo' },
-  { label: 'BSE - public issues', url: 'https://www.bseindia.com/markets/PublicIssues/IPOIssues_new.aspx' },
-  { label: 'SEBI - filings', url: 'https://www.sebi.gov.in/filings/public-issues.html' },
+  { label: 'IPO Ji', url: 'https://www.ipoji.com/ipo-gmp' },
+  { label: 'NSE', url: 'https://www.nseindia.com/market-data/all-upcoming-issues-ipo' },
+  { label: 'BSE', url: 'https://www.bseindia.com/markets/PublicIssues/IPOIssues_new.aspx' },
+  { label: 'SEBI', url: 'https://www.sebi.gov.in/filings/public-issues.html' },
 ];
 
 export function SettingsScreen({ theme }: { theme: Theme }) {
@@ -43,7 +43,6 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
     rescheduleAll,
     refresh,
     refreshing,
-    lastChecked,
     alerts,
     clearAlerts,
     showToast,
@@ -77,13 +76,13 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
         theme={theme}
         large
         title="Settings"
-        subtitle={`${watchlist.length} tracked • ${ipos.length} issues on the board`}
+        subtitle={`${watchlist.length} tracked • ${ipos.length} mainboard issues`}
       />
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 44 }}
         showsVerticalScrollIndicator={false}
       >
-        <SectionCard theme={theme} title="Appearance" subtitle="Applies instantly across every screen">
+        <SectionCard theme={theme} title="Appearance">
           <View style={styles.modeRow}>
             {MODES.map((mode) => {
               const active = themeMode === mode.key;
@@ -114,7 +113,7 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
           </View>
         </SectionCard>
 
-        <SectionCard theme={theme} title="Reminders" style={{ marginTop: 14 }}>
+        <SectionCard theme={theme} title="Reminders" style={{ marginTop: 12 }}>
           <View style={[styles.permRow, { backgroundColor: theme.cardAlt }]}>
             <Ionicons
               name={permission === 'granted' ? 'notifications' : 'notifications-off-outline'}
@@ -134,18 +133,14 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
             )}
           </View>
 
-          <View style={{ marginTop: 6 }}>
+          <View style={{ marginTop: 4 }}>
             {NOTIF_ROWS.map((row, i) => (
               <View
                 key={row.key}
                 style={[styles.switchRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border }]}
               >
-                <View style={{ flex: 1, paddingRight: 10 }}>
-                  <Text style={{ fontSize: 13.5, fontWeight: '700', color: theme.text }}>{row.label}</Text>
-                  <Text style={{ fontSize: 11.5, color: theme.textMuted, marginTop: 2, lineHeight: 16 }}>
-                    {row.hint}
-                  </Text>
-                </View>
+                <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '700', color: theme.text }}>{row.label}</Text>
+                <Text style={{ fontSize: 11, color: theme.textMuted, marginRight: 8 }}>{row.hint}</Text>
                 <Switch
                   value={prefs[row.key]}
                   onValueChange={(v) => setPref(row.key, v)}
@@ -158,15 +153,14 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
           </View>
 
           {permission === 'unsupported' ? (
-            <Text style={{ fontSize: 11.5, color: theme.textMuted, marginTop: 12, lineHeight: 17 }}>
-              Local reminders fire on the iOS and Android builds. In this browser preview every planned reminder is
-              written to the reminder log instead, so you can see exactly what would be sent.
+            <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 8, lineHeight: 16 }}>
+              Reminders fire on the phone builds; this browser preview writes them to the reminder log instead.
             </Text>
           ) : (
             <Button
               theme={theme}
-              label={refreshing ? 'Rescheduling…' : 'Reschedule my reminders'}
-              variant="soft"
+              label={refreshing ? 'Rescheduling…' : 'Reschedule reminders'}
+              variant="ghost"
               icon="sync-outline"
               loading={refreshing}
               onPress={async () => {
@@ -178,53 +172,25 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
                   'up'
                 );
               }}
-              style={{ marginTop: 14 }}
+              style={{ marginTop: 6 }}
             />
           )}
         </SectionCard>
 
         <SectionCard
           theme={theme}
-          title="Data"
+          title="Live data & sources"
           subtitle={
             live.fetchedAt
-              ? `Checked the boards ${timeAgo(live.fetchedAt)} - newest quote published ${boardAsOfLabel}${
+              ? `Checked ${timeAgo(live.fetchedAt)} • newest quote ${boardAsOfLabel}${
                   quoteAge(live.asOf, live.fetchedAt) ? ` (${quoteAge(live.asOf, live.fetchedAt)} old)` : ''
                 }`
               : age.stale
-                ? `Snapshot is ${age.label} - figures may have moved`
-                : `Snapshot ${age.label}`
+                ? `Bundled snapshot ${age.label} - figures may have moved`
+                : `Bundled snapshot ${age.label}`
           }
-          style={{ marginTop: 14 }}
+          style={{ marginTop: 12 }}
         >
-          <KeyValueRow theme={theme} label="Data on screen" value={live.fetchedAt ? 'Live pull' : 'Bundled snapshot'} />
-          <KeyValueRow
-            theme={theme}
-            label={live.fetchedAt ? 'Newest quote published' : 'Board snapshot'}
-            value={live.fetchedAt ? boardAsOfLabel : DATA_AS_OF_LABEL}
-          />
-          <KeyValueRow
-            theme={theme}
-            label="Checked in app"
-            value={live.fetchedAt ? `${timeAgo(live.fetchedAt)} (${formatIstTime(live.fetchedAt)})` : 'not yet - tap Re-check the board'}
-          />
-          {live.fetchedAt ? (
-            <KeyValueRow
-              theme={theme}
-              label="Quote age"
-              value={
-                quoteAge(live.asOf, live.fetchedAt)
-                  ? `${quoteAge(live.asOf, live.fetchedAt)} behind this refresh - the sources have not published anything newer`
-                  : 'current as of this refresh'
-              }
-              multiline
-            />
-          ) : null}
-          <KeyValueRow theme={theme} label="Snapshot source" value={DATA_SOURCE_LABEL} multiline />
-          <KeyValueRow theme={theme} label="Issues on the board" value={String(ipos.length)} />
-          <KeyValueRow theme={theme} label="Last checked in app" value={`${timeAgo(lastChecked)} (${formatIstTime(lastChecked)})`} />
-          <KeyValueRow theme={theme} label="Logged reminders" value={String(alerts.length)} />
-
           {live.sources.length > 0
             ? live.sources.map((source) => (
                 <KeyValueRow
@@ -247,69 +213,67 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
 
           <Button
             theme={theme}
-            label="Re-check the board"
-            variant="ghost"
+            label={refreshing ? 'Checking…' : 'Re-check the board'}
+            variant="soft"
             icon="refresh"
             loading={refreshing}
             onPress={refresh}
-            style={{ marginTop: 12 }}
+            style={{ marginTop: 10 }}
           />
-          <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 10, lineHeight: 16 }}>
-            A refresh downloads the IPO Ji boards and merges today{"'"}s figures over the snapshot that ships with
-            the app. If those boards cannot be reached, {live.ai?.armed ? 'your saved key searches the web instead' : 'add a live data key above to have the app search the web instead'}.
-          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10, alignItems: 'center' }}>
+            <Text style={{ fontSize: 11, color: theme.textMuted }}>Official sources</Text>
+            {SOURCES.map((source) => (
+              <Pressable
+                key={source.url}
+                onPress={() => openLink(source.url)}
+                hitSlop={8}
+                accessibilityRole="link"
+                accessibilityLabel={`Open ${source.label}`}
+                style={{
+                  paddingHorizontal: 9,
+                  paddingVertical: 4,
+                  borderRadius: radius.pill,
+                  backgroundColor: theme.cardAlt,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '700', color: theme.primary }}>{source.label}</Text>
+              </Pressable>
+            ))}
+          </View>
         </SectionCard>
 
         <AiKeyCard theme={theme} />
 
-        <SectionCard theme={theme} title="Sources" style={{ marginTop: 14 }}>
-          {SOURCES.map((source) => (
-            <KeyValueRow
-              key={source.url}
-              theme={theme}
-              label={source.label}
-              value="Open"
-              tone="primary"
-              icon="open-outline"
-              onPress={() => openLink(source.url)}
-            />
-          ))}
-        </SectionCard>
-
-        <SectionCard theme={theme} title="Privacy & data" style={{ marginTop: 14 }}>
-          <Text style={{ fontSize: 13, color: theme.textSub, lineHeight: 20 }}>
-            Your watchlist, reminder preferences, theme and reminder log are stored only on this device. The app has
-            no account, sends no analytics and makes no network requests in the background.
+        <SectionCard theme={theme} title="About" style={{ marginTop: 12 }}>
+          <Text style={{ fontSize: 12.5, color: theme.textSub, lineHeight: 19 }}>
+            Grey market quotes and subscription multiples for mainboard IPOs - never a listing-price prediction.
           </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 }}>
+            <Ionicons name="shield-checkmark-outline" size={15} color={theme.primary} />
+            <Text style={{ flex: 1, fontSize: 11, color: theme.textMuted, lineHeight: 16 }}>
+              Unofficial and unregulated; not investment advice.
+            </Text>
+            <Text style={{ fontSize: 11, color: theme.textMuted }}>
+              v{appVersion()}
+              {live.ai?.used ? ' • AI' : ''}
+            </Text>
+          </View>
           <Button
             theme={theme}
-            label="Clear the reminder log"
-            variant="danger"
+            label={alerts.length > 0 ? `Clear the reminder log (${alerts.length})` : 'Clear the reminder log'}
+            variant="ghost"
             icon="trash-outline"
             disabled={alerts.length === 0}
             onPress={async () => {
               await clearAlerts();
               showToast('Reminder log cleared', 'info');
             }}
-            style={{ marginTop: 14 }}
+            style={{ marginTop: 6 }}
           />
-        </SectionCard>
-
-        <SectionCard theme={theme} title="About" style={{ marginTop: 14 }}>
-          <Text style={{ fontSize: 13, color: theme.textSub, lineHeight: 20 }}>
-            IPO Pulse keeps the primary market readable: the grey market quote, category-wise subscription, a derived
-            demand signal and the four dates that decide everything - in plain language, without pretending to
-            predict listing prices.
-          </Text>
-          <View style={[styles.aboutPill, { backgroundColor: theme.cardAlt }]}>
-            <Ionicons name="shield-checkmark-outline" size={15} color={theme.primary} />
-            <Text style={{ flex: 1, fontSize: 12, color: theme.textSub, lineHeight: 17 }}>
-              Grey market premiums are unofficial and unregulated. Nothing here is investment advice - read the RHP
-              and consider a SEBI-registered adviser.
-            </Text>
-          </View>
-          <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 12 }}>
-            Version {appVersion()} • live boards{live.ai?.used ? ' + AI web search' : ''}
+          <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 4 }}>
+            Watchlist, preferences and log stay on this device. No account, no analytics, no background calls.
           </Text>
         </SectionCard>
       </ScrollView>
@@ -320,9 +284,9 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
 /** The running version, straight from app.json - it must never drift from the build again. */
 function appVersion(): string {
   try {
-    return Constants.expoConfig?.version ?? '1.3.0';
+    return Constants.expoConfig?.version ?? '1.5.0';
   } catch {
-    return '1.3.0';
+    return '1.5.0';
   }
 }
 

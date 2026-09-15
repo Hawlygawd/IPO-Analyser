@@ -31,7 +31,7 @@ export function boardPrompt(ipos: IPO[], options: PromptOptions = {}): { system:
   const chosen = ipos.slice(0, limit);
 
   const system = [
-    'You are a market-data extractor for Indian IPOs (NSE/BSE mainboard and SME).',
+    'You are a market-data extractor for Indian mainboard IPOs (NSE/BSE).',
     'You use web search to find the LATEST published grey market premium (GMP) and subscription figures.',
     'You answer with raw JSON only: no prose, no markdown, no code fences.',
   ].join(' ');
@@ -69,9 +69,8 @@ export function boardPrompt(ipos: IPO[], options: PromptOptions = {}): { system:
       ipo.priceBandLow !== undefined && ipo.priceBandHigh !== undefined
         ? `band \u20b9${ipo.priceBandLow}-${ipo.priceBandHigh}`
         : 'band not published';
-    lines.push(
-      `- ${ipo.name} (${ipo.segment}, ${band}, bidding ${ipo.openDate} to ${ipo.closeDate}, listed as ${ipo.platform})`
-    );
+    // every issue offered here is mainboard, so the segment would be the same word on every line
+    lines.push(`- ${ipo.name} (${band}, bidding ${ipo.openDate} to ${ipo.closeDate}, listed as ${ipo.platform})`);
   }
 
   return { system, user: lines.join('\n') };

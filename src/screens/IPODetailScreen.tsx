@@ -91,7 +91,7 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
   const overRetailCap = cost != null && cost > RETAIL_CAP;
 
   const shareText = [
-    `${ipo.name} (${ipo.platform} ${ipo.segment})`,
+    `${ipo.name} (${ipo.platform})`,
     priceBandLabel(ipo),
     ipo.gmp != null
       ? `Grey market premium ${formatRupees(ipo.gmp)}${pct != null ? ` (${formatPct(pct)})` : ''}`
@@ -153,7 +153,7 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
       <ScreenHeader
         theme={theme}
         title={ipo.name}
-        subtitle={`${ipo.platform} • ${ipo.sector ?? ipo.segment}`}
+        subtitle={`${ipo.platform} • ${ipo.sector ?? 'Mainboard'}`}
         onBack={() => navigation.goBack()}
         right={
           <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -209,7 +209,9 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
               </Text>
               <Row style={{ gap: 6, marginTop: 7 }} wrap>
                 <Chip label={phase.label} tone={phaseTone(phase.key)} theme={theme} small />
-                <Chip label={ipo.segment} tone="neutral" theme={theme} small />
+                {ipo.platform === 'NSE' || ipo.platform === 'BSE' ? null : (
+                  <Chip label={ipo.platform} tone="neutral" theme={theme} small />
+                )}
                 {milestone ? (
                   <Chip label={`${milestone.label} ${formatDay(milestone.date)}`} tone="info" theme={theme} small />
                 ) : null}

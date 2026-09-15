@@ -20,7 +20,7 @@ export interface IPOCardProps {
 function subscriptionStat(ipo: IPO): { value: string; sub: string } {
   const s = ipo.subscription;
   if (s?.total != null) return { value: formatMultiple(s.total), sub: 'Overall' };
-  if (s?.retail != null) return { value: formatMultiple(s.retail), sub: ipo.segment === 'SME' ? 'Individual' : 'Retail' };
+  if (s?.retail != null) return { value: formatMultiple(s.retail), sub: 'Retail' };
   if (s?.qib != null) return { value: formatMultiple(s.qib), sub: 'QIB' };
   return { value: '—', sub: phaseOf(ipo).key === 'upcoming' ? 'Not opened' : 'Not published' };
 }
@@ -68,7 +68,7 @@ export function IPOCard({ ipo, theme, onPress, watched, onToggleWatch, index = 0
         <Pressable
           onPress={onPress}
           accessibilityRole="button"
-          accessibilityLabel={`${ipo.name}, ${ipo.platform} ${ipo.segment} IPO. ${phase.label}. ${
+          accessibilityLabel={`${ipo.name}, ${ipo.platform} IPO. ${phase.label}. ${
             ipo.gmp != null ? `Grey market premium ${formatRupees(ipo.gmp)}` : 'No grey market quote'
           }. ${dateLine(ipo)}.`}
           accessibilityHint="Opens the full analysis for this IPO"

@@ -6,7 +6,6 @@ import {
   daysToNextMilestone,
   gmpBoardStats,
   matchesQuery,
-  matchesSegment,
   matchesToggles,
   sortIpos,
 } from '../board';
@@ -68,22 +67,19 @@ test('boardStats counts live issues and finds the next opening', () => {
   assert.ok(stats.nextToOpen != null && stats.nextToOpen.openDate > DATA_AS_OF.slice(0, 10));
 });
 
-test('search matches name, sector, segment, platform and exchange', () => {
+test('search matches name, sector, platform and exchange', () => {
   const sample = IPOT.find((i) => i.id === 'kanohar-electricals')!;
   assert.equal(matchesQuery(sample, ''), true);
   assert.equal(matchesQuery(sample, 'kanohar'), true);
   assert.equal(matchesQuery(sample, 'POWER'), true);
-  assert.equal(matchesQuery(sample, 'mainboard'), true);
   assert.equal(matchesQuery(sample, 'nse'), true);
   assert.equal(matchesQuery(sample, 'zzzzz'), false);
 });
 
-test('the segment filter partitions the board', () => {
-  const mainboard = IPOT.filter((i) => matchesSegment(i, 'mainboard'));
-  const sme = IPOT.filter((i) => matchesSegment(i, 'sme'));
-  assert.equal(mainboard.length + sme.length, IPOT.length);
-  assert.ok(mainboard.every((i) => i.segment === 'Mainboard'));
-  assert.equal(IPOT.filter((i) => matchesSegment(i, 'all')).length, IPOT.length);
+test('every issue on the board is mainboard', () => {
+  // SME rows were removed from the app; the bundle and the live merge must not carry one back
+  assert.ok(IPOT.every((ipo) => ipo.segment === 'Mainboard'));
+  assert.equal(IPOT.some((ipo) => /SME/i.test(ipo.platform)), false, 'an SME platform label survived');
 });
 
 test('the quoted and premium toggles filter exactly as labelled', () => {

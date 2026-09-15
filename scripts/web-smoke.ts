@@ -402,14 +402,30 @@ async function main() {
   assert.match(detail, /1,700/, 'detail screen: price band missing');
   assert.match(detail, /Watch \+ reminders/, 'detail screen: sticky action bar missing');
 
-  // the lot calculator must move the cost when lots change
+  // The lot calculator must move the cost when lots change. jsdom's responder can swallow the
+  // first synthetic tap on a Pressable inside a ScrollView while the scroll responder settles,
+  // so tap again rather than sleeping longer - a user would do exactly that.
   assert.ok(detail.includes('1 ×'), 'detail screen: lot default missing');
-  press('Increase the number of lots');
-  await settle(250);
+  const lotsValue = () => Number(/Lots to apply for\D{0,3}(\d+)/.exec(textOf('#root'))?.[1] ?? 0);
+  const tapUntil = async (label: string, met: () => boolean, tries = 3) => {
+    for (let i = 0; i < tries && !met(); i += 1) {
+      press(label);
+      await settle(600);
+    }
+    return met();
+  };
+  const lotsBefore = lotsValue();
+  assert.ok(lotsBefore === 1, `detail screen: expected one lot to start with, saw ${lotsBefore}`);
+  assert.ok(
+    await tapUntil('Increase the number of lots', () => lotsValue() === lotsBefore + 1),
+    'lot stepper did not update the lot count'
+  );
   detail = textOf('#root');
   assert.match(detail, /2 ×/, 'lot stepper did not update the cost breakdown');
-  press('Decrease the number of lots');
-  await settle(250);
+  assert.ok(
+    await tapUntil('Decrease the number of lots', () => lotsValue() === lotsBefore),
+    'lot stepper did not step back down'
+  );
 
   // watching from the detail screen must flip the button and log a reminder
   press('Watch + reminders');
@@ -521,9 +537,20 @@ async function main() {
     assert.match(settings, /IPO Market GMP \(30-min refresh\)/, 'live mode: the second GMP source is missing from the source list');
     assert.match(settings, /IPO Market GMP \(30-min refresh\)[\s\S]{0,80}3 rows/, 'live mode: the second source did not report its rows');
   }
+  if (process.env.WEB_SMOKE_DUMP === '1') {
+    // dev aid: print what the Settings screen actually says, to judge density after an edit
+    console.log('\n--- Settings, as rendered ---\n' + settings + '\n---');
+  }
   assert.match(settings, /Appearance/, 'settings: appearance card missing');
   assert.match(settings, /Reminders/, 'settings: reminders card missing');
-  assert.match(settings, /Privacy & data/, 'settings: privacy card missing');
+  assert.match(settings, /Live data & sources/, 'settings: the live data card is missing');
+  assert.match(settings, /About/, 'settings: about card missing');
+  assert.match(settings, /Unofficial and unregulated/, 'settings: the disclaimer line is missing');
+  // the consolidated card must not repeat itself: the fetch time lives in the subtitle only
+  assert.ok(
+    !/Last live fetch|Quote age|Snapshot source|Issues on the board|Last checked in app|Logged reminders/.test(settings),
+    'settings: a duplicated row survived the cleanup'
+  );
 
   // dark mode must repaint the shell
   press('Dark theme');
@@ -542,7 +569,8 @@ async function main() {
     const keyCard = textOf('#root');
     assert.match(keyCard, /Live data key \(AI assist\)/, 'settings: the live data key card is missing');
     assert.match(keyCard, /Test this key/, 'the dry-check button is missing');
-    assert.match(keyCard, /Get a Google Gemini key/, 'the free-tier links are missing');
+    assert.match(keyCard, /Free key:/, 'the free-tier key chips are missing');
+    assert.match(keyCard, /Google Gemini/, 'the provider chips are missing');
 
     // paste a key exactly as a user would, through the real input
     const keyInput = window.document.querySelector('input[aria-label="API key"]') as HTMLInputElement | null;
@@ -554,7 +582,9 @@ async function main() {
     press('Save key');
     await settle(500);
     assert.match(textOf('#root'), /AIza…0000/, 'the saved key was not shown back');
-    assert.match(textOf('#root'), /Detected as/, 'the key shape was not reported');
+    assert.match(textOf('#root'), /Provider/, 'the provider summary row is missing');
+    // a saved key starts folded: provider, model and the key field stay behind the toggle
+    assert.match(textOf('#root'), /Provider & model/, 'the fold toggle is missing');
 
     // dry check 1: does the key authenticate and answer?
     press('Test this key');
@@ -581,7 +611,7 @@ async function main() {
     await settle(1500);
     assert.match(
       textOf('#root'),
-      /Last refresh: 3 rows from Google Gemini/,
+      /Last search[\s\S]{0,20}3 rows from Google Gemini/,
       'the forced AI refresh did not record what it used'
     );
 

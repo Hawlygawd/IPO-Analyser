@@ -188,6 +188,20 @@ jobs:
           Settings screen lists each source with its row count and stamp, and issues that only
           exist live (a new SME opening, for example) are added to the board automatically.
 
+          **New in 1.5.0 - mainboard only, and a Settings screen you can read.** The board now
+          carries mainboard IPOs exclusively: SME issues (BSE SME / NSE SME) are out of the app
+          entirely - out of the bundled snapshot and dropped by the live pull, so a new SME opening
+          cannot creep back in. The board is 18 mainboard issues with their quotes, subscription and
+          demand, and the segment filter above the list is gone with them.
+
+          Settings was doing too much and saying the same thing twice, so it is now five short
+          cards: theme, reminders (compact switches with a one-line hint each), **Live data &
+          sources** (one status line, the five sources with their row count and stamp, the re-check
+          button and the official IPO Ji / NSE / BSE / SEBI links), the optional AI key, and About
+          (two lines, the version, and the reminder log). Duplicated rows are gone - the fetch time
+          and quote age live in the card's own status line, and the key card folds its provider and
+          model settings away until you tap "Provider & model".
+
           **New in 1.4.1 - your key keeps working when the provider renames its models.** Google
           retired gemini-2.5 for new keys and answered every request with "no longer available to new
           users - use models/gemini-3.6-flash", so the dry check failed even though the key was fine.

@@ -104,18 +104,9 @@ export function matchesQuery(ipo: IPO, rawQuery: string): boolean {
   return (
     ipo.name.toLowerCase().includes(q) ||
     (ipo.sector?.toLowerCase().includes(q) ?? false) ||
-    ipo.segment.toLowerCase().includes(q) ||
     ipo.platform.toLowerCase().includes(q) ||
     ipo.exchanges.join(' ').toLowerCase().includes(q)
   );
-}
-
-export type SegmentFilter = 'all' | 'mainboard' | 'sme';
-
-export function matchesSegment(ipo: IPO, filter: SegmentFilter): boolean {
-  if (filter === 'mainboard') return ipo.segment === 'Mainboard';
-  if (filter === 'sme') return ipo.segment === 'SME';
-  return true;
 }
 
 export interface GmpToggles {

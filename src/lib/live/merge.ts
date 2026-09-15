@@ -247,7 +247,9 @@ export function mergeBoard(
 
   for (const [id, row] of candidates) {
     const built = buildIpo(id, row, new Date(meta.fetchedAt));
-    if (built) {
+    // an SME discovery is built and then dropped below, so it must not be counted as added:
+    // "3 new issues" has to mean three rows the user can actually see
+    if (built && built.segment === 'Mainboard') {
       discovered.push(built);
       added += 1;
     }
@@ -265,7 +267,9 @@ export function mergeBoard(
     : new Date(meta.fetchedAt).toISOString();
 
   return {
-    ipos: [...board, ...discovered],
+    // mainboard only: during a pull, upstream can hand us SME issues (a fresh SME opening, or
+    // a row the matcher could not place) and they must never enter the board
+    ipos: [...board, ...discovered].filter((ipo) => ipo.segment === 'Mainboard'),
     asOf,
     fetchedAt: meta.fetchedAt,
     sources: meta.sources,

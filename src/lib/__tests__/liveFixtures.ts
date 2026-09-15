@@ -30,19 +30,19 @@ export const GMP_HTML = `
       <td data-label="Status"><span class="gmp-status gmp-status-open">Open</span></td>
       <td class="gmp-secondary" data-label="Last Updated"><time class="gmp-updated-time" datetime="2026-09-14T12:00:00.000Z">14 Sep 2026, 5:30 PM IST</time></td>
     </tr>
-    <tr class="gmp-row gmp-row-nogmp" data-type="sme" data-status="open" data-hasgmp="false"
+    <tr class="gmp-row gmp-row-nogmp" data-type="mainboard" data-status="open" data-hasgmp="false"
         data-gmp="" data-pct=""
-        data-indicative="" data-name="Om Galaxy"
-        data-rowurl="/ipo/om-galaxy-ipo">
+        data-indicative="" data-name="Jindal Supreme India"
+        data-rowurl="/ipo/jindal-supreme-ipo">
       <td class="gmp-col-name" data-label="IPO">
-        <a class="gmp-ipo-link" href="/ipo/om-galaxy-ipo">Om Galaxy IPO</a>
+        <a class="gmp-ipo-link" href="/ipo/jindal-supreme-ipo">Jindal Supreme (India) IPO</a>
         <span class="gmp-mobile-meta">
-          <span class="gmp-type-badge gmp-type-bse-sme">BSE SME</span>
+          <span class="gmp-type-badge gmp-type-mainboard">Mainboard</span>
           <span class="gmp-status gmp-status-open">Open</span>
         </span>
       </td>
-      <td data-label="Type"><span class="gmp-type-badge gmp-type-bse-sme">BSE SME</span></td>
-      <td class="gmp-num" data-label="Price Band">₹85-90</td>
+      <td data-label="Type"><span class="gmp-type-badge gmp-type-mainboard">Mainboard</span></td>
+      <td class="gmp-num" data-label="Price Band">₹88-93</td>
       <td class="gmp-num gmp-na" data-label="GMP"><span class="gmp-na" title="GMP not available yet">—</span></td>
       <td class="gmp-num gmp-na" data-label="GMP %"><span class="gmp-na">—</span></td>
       <td class="gmp-num" data-label="Indicative Listing"><span class="gmp-na">—</span></td>

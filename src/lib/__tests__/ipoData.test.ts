@@ -5,11 +5,12 @@ import { parseISO } from '../format';
 import { phaseOf } from '../analysis';
 import { Platform, MilestoneKey } from '../types';
 
-const VALID_PLATFORMS: Platform[] = ['NSE', 'BSE', 'NSE SME', 'BSE SME'];
+const VALID_PLATFORMS: Platform[] = ['NSE', 'BSE'];
 const VALID_MILESTONES: MilestoneKey[] = ['open', 'close', 'allotment', 'listing'];
 
-test('the board is not empty and every id is unique', () => {
-  assert.ok(IPOT.length >= 20, `expected a populated board, got ${IPOT.length}`);
+test('the board is a populated, mainboard-only set with unique ids', () => {
+  assert.ok(IPOT.length >= 12, `expected a populated board, got ${IPOT.length}`);
+  assert.ok(IPOT.every((ipo) => ipo.segment === 'Mainboard'), 'an SME issue is still on the board');
   const ids = new Set(IPOT.map((i) => i.id));
   assert.equal(ids.size, IPOT.length, 'duplicate IPO ids on the board');
   assert.equal(Object.keys(IPO_BY_ID).length, IPOT.length);

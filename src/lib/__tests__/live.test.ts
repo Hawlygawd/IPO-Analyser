@@ -63,7 +63,7 @@ test('the GMP board parses every row, quoted or not', () => {
   assert.equal(parsed.quoted, 1);
   assert.equal(parsed.asOf, '2026-09-14T12:00:00.000Z');
 
-  const [veegaland, omGalaxy] = parsed.rows;
+  const [veegaland, noQuote] = parsed.rows;
   assert.equal(veegaland.id, 'veegaland-developers');
   assert.equal(veegaland.name, 'Veegaland Developers');
   assert.equal(veegaland.segment, 'Mainboard');
@@ -79,15 +79,17 @@ test('the GMP board parses every row, quoted or not', () => {
   assert.equal(veegaland.url, 'https://www.ipoji.com/ipo/veegaland-developers-ipo');
 
   // the "no quote" variant: empty data-* attributes must not become 0
-  assert.equal(omGalaxy.id, 'om-galaxy');
-  assert.equal(omGalaxy.gmp, undefined);
-  assert.equal(omGalaxy.gmpPct, undefined);
-  assert.equal(omGalaxy.indicative, undefined);
-  assert.equal(omGalaxy.bandLow, 85);
-  assert.equal(omGalaxy.updatedAt, undefined);
-  assert.equal(omGalaxy.platform, 'BSE SME');
+  assert.equal(noQuote.id, 'jindal-supreme');
+  assert.equal(noQuote.gmp, undefined);
+  assert.equal(noQuote.gmpPct, undefined);
+  assert.equal(noQuote.indicative, undefined);
+  assert.equal(noQuote.bandLow, 88);
+  assert.equal(noQuote.updatedAt, undefined);
+  assert.equal(noQuote.platform, undefined); // this row prints "Mainboard", not an exchange
 
+  // the SME row is still parsed - the merge is what drops it from the board
   assert.equal(parsed.rows[2].platform, 'NSE SME');
+  assert.equal(parsed.rows[2].segment, 'SME');
   assert.equal(parsed.rows[2].open, false);
 });
 
@@ -229,10 +231,10 @@ test('a live pull overwrites only the fields upstream actually published', () =>
   assert.equal(veegaland.about.length > 0, true);
 
   // "no quote recorded" upstream clears a stale quote instead of keeping it
-  const omGalaxy = board.ipos.find((ipo) => ipo.id === 'om-galaxy')!;
-  assert.equal(omGalaxy.gmp, undefined);
-  assert.equal(omGalaxy.gmpUpdated, undefined);
-  assert.equal(omGalaxy.priceBandLow, 85);
+  const noQuote = board.ipos.find((ipo) => ipo.id === 'jindal-supreme')!;
+  assert.equal(noQuote.gmp, undefined);
+  assert.equal(noQuote.gmpUpdated, undefined);
+  assert.equal(noQuote.priceBandLow, 88);
 
   // upstream files Manipal under a longer slug than our id - it must still match
   const manipal = board.ipos.find((ipo) => ipo.id === 'manipal-payment')!;
@@ -255,8 +257,8 @@ test('a live pull overwrites only the fields upstream actually published', () =>
   assert.equal(board.ipos.some((ipo) => /kwick/i.test(ipo.name)), false);
 
   // an issue with no live row at all is left exactly as the snapshot had it
-  const untouched = board.ipos.find((ipo) => ipo.id === 'quanto-agroworld')!;
-  const snapshotUntouched = IPOT.find((ipo) => ipo.id === 'quanto-agroworld')!;
+  const untouched = board.ipos.find((ipo) => ipo.id === 'rentomojo')!;
+  const snapshotUntouched = IPOT.find((ipo) => ipo.id === 'rentomojo')!;
   assert.deepEqual(untouched, snapshotUntouched);
 
   // the board's stamp is the newest quote anyone published, not the moment we fetched
@@ -264,8 +266,9 @@ test('a live pull overwrites only the fields upstream actually published', () =>
   assert.equal(board.fetchedAt, Date.parse('2026-09-14T12:31:00Z'));
   assert.equal(istLabel(board.asOf), '14 Sep 2026, 8:45 PM IST');
   // exactly the issues whose figures moved: Veegaland (quote, band dates, subscription),
-  // Manipal (subscription split) and Kanohar (the newer quote from the second source)
-  assert.equal(board.updated, 3);
+  // Manipal (subscription split), Kanohar (the newer quote from the second source) and
+  // Jindal Supreme (upstream withdrew the quote it used to carry)
+  assert.equal(board.updated, 4);
 });
 
 test('live-only issues are appended, with derived milestone dates marked tentative', () => {
@@ -273,21 +276,18 @@ test('live-only issues are appended, with derived milestone dates marked tentati
   const board = mergeBoard(IPOT, parsed, { fetchedAt: Date.parse('2026-09-14T12:31:00Z'), sources: [] });
   const added = board.ipos.filter((ipo) => !IPOT.some((existing) => existing.id === ipo.id));
 
+  // only the mainboard discovery is appended: the SME one (Legacy Wires) is dropped, because
+  // this app carries mainboard issues only
   assert.deepEqual(
     added.map((ipo) => ipo.id),
-    ['legacy-wires', 'jio-platforms']
+    ['jio-platforms']
   );
-  const [legacy, jio] = added;
-  assert.equal(legacy.name, 'Legacy Wires');
-  assert.equal(legacy.segment, 'SME');
-  assert.equal(legacy.platform, 'NSE SME');
-  assert.equal(legacy.openDate, '2026-09-01');
-  assert.equal(legacy.closeDate, '2026-09-04');
-  assert.equal(legacy.listingDate, '2026-09-17'); // from the calendar event
-  assert.equal(legacy.allotmentDate, '2026-09-07'); // derived: one working day after close
-  assert.deepEqual(legacy.tentativeDates, ['allotment']);
-  assert.equal(board.added, 2);
-  assert.equal(board.ipos.length, IPOT.length + 2);
+  assert.ok(!board.ipos.some((ipo) => /legacy wires/i.test(ipo.name)), 'an SME discovery reached the board');
+  const [jio] = added;
+  // every issue on the board is mainboard, including the ones upstream only carries live
+  assert.ok(board.ipos.every((ipo) => ipo.segment === 'Mainboard'));
+  assert.equal(board.added, 1);
+  assert.equal(board.ipos.length, IPOT.length + 1);
 
   // a card is also enough to render an issue: band, lot, size and subscription come with it
   assert.equal(jio.priceBandLow, 1180);

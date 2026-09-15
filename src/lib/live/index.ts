@@ -33,6 +33,20 @@ export function hasLiveData(parsed: ParsedLive): boolean {
 }
 
 /**
+ * The source rows Settings shows before the first pull finishes, so the live-data card reads
+ * as "here is what we read and what it said" instead of being blank until a refresh happens.
+ */
+export function pendingSourceStatuses(): LiveSourceStatus[] {
+  return (['gmp', 'gmpAlt', 'subscription', 'cards', 'calendar'] as LiveSourceKey[]).map((key) => ({
+    key,
+    label: SOURCE_LABELS[key],
+    ok: true,
+    rows: 0,
+    note: 'not checked yet',
+  }));
+}
+
+/**
  * Every board marked unavailable, for the case where the pull did not even get far enough
  * to name a per-page error (offline phone, DNS failure). Settings lists sources one by one,
  * so it must not show a four-source pull as "nothing happened".

@@ -21,6 +21,7 @@ import {
   type LiveBoard,
   type LiveSourceStatus,
   emptyParsedLive,
+  pendingSourceStatuses,
   type ParsedLive,
 } from './live';
 import { aiBoardSearch, aiSourceStatus, aiIdleStatus, type AiSearchResult } from './ai/search';
@@ -158,7 +159,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [liveError, setLiveError] = useState<string | null>(null);
   const [liveUpdated, setLiveUpdated] = useState(0);
   const [liveAdded, setLiveAdded] = useState(0);
-  const [liveSources, setLiveSources] = useState<LiveSourceStatus[]>([]);
+  const [liveSources, setLiveSources] = useState<LiveSourceStatus[]>(pendingSourceStatuses);
   const [liveAi, setLiveAi] = useState<AiPullInfo | null>(null);
 
   // refs mirror the state the async notification code needs to read

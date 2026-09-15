@@ -351,7 +351,7 @@ export function subscriptionRows(ipo: IPO): SubscriptionRow[] {
   };
   push('qib', 'QIB', s.qib, 'info');
   push('nii', 'NII / HNI', s.nii, 'up');
-  push('retail', ipo.segment === 'SME' ? 'Individual investors' : 'Retail', s.retail, 'up');
+  push('retail', 'Retail', s.retail, 'up');
   push('total', 'Overall', s.total, 'warn');
   return rows;
 }

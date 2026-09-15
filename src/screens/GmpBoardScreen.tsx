@@ -8,19 +8,9 @@ import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
 import { DATA_AS_OF_LABEL } from '../lib/ipoData';
 import { formatIstTime, formatPct, formatRupees, gmpPercent } from '../lib/format';
-import {
-  GmpToggles,
-  SegmentFilter,
-  SortKey,
-  gmpBoardStats,
-  matchesQuery,
-  matchesSegment,
-  matchesToggles,
-  sortIpos,
-} from '../lib/board';
+import { GmpToggles, SortKey, gmpBoardStats, matchesQuery, matchesToggles, sortIpos } from '../lib/board';
 import { Avatar, EmptyState } from '../components/ui';
 import { PremiumBar, SummaryTile, premiumTone } from '../components/Charts';
-import { SegmentedTabs } from '../components/SegmentedTabs';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { LiveChip } from '../components/LiveChip';
 import { RootStackParamList } from '../navigation/types';
@@ -36,19 +26,15 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { isWatched, toggleWatch, refresh, refreshing, ipos, live, boardAsOfLabel } = useStore();
   const [query, setQuery] = useState('');
-  const [segment, setSegment] = useState<SegmentFilter>('all');
   const [toggles, setToggles] = useState<GmpToggles>({ quotedOnly: false, strongOnly: false });
   const [sort, setSort] = useState<SortKey>('premium');
 
   const stats = useMemo(() => gmpBoardStats(ipos), [ipos]);
-  const mainboardCount = useMemo(() => ipos.filter((i) => i.segment === 'Mainboard').length, [ipos]);
 
   const rows = useMemo(() => {
-    const filtered = ipos.filter(
-      (ipo) => matchesQuery(ipo, query) && matchesSegment(ipo, segment) && matchesToggles(ipo, toggles)
-    );
+    const filtered = ipos.filter((ipo) => matchesQuery(ipo, query) && matchesToggles(ipo, toggles));
     return sortIpos(filtered, sort);
-  }, [ipos, query, segment, toggles, sort]);
+  }, [ipos, query, toggles, sort]);
 
   const toggle = (key: keyof GmpToggles) => setToggles((prev) => ({ ...prev, [key]: !prev[key] }));
 
@@ -118,18 +104,6 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
             </Pressable>
           ) : null}
         </View>
-
-        <SegmentedTabs<SegmentFilter>
-          theme={theme}
-          value={segment}
-          onChange={setSegment}
-          accessibilityLabel="Filter the GMP board by segment"
-          options={[
-            { key: 'all', label: 'All', count: ipos.length },
-            { key: 'mainboard', label: 'Mainboard', count: mainboardCount },
-            { key: 'sme', label: 'SME', count: ipos.length - mainboardCount },
-          ]}
-        />
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <ToggleChip
@@ -275,7 +249,6 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
             actionLabel="Clear filters"
             onAction={() => {
               setQuery('');
-              setSegment('all');
               setToggles({ quotedOnly: false, strongOnly: false });
             }}
           />

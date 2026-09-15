@@ -124,8 +124,8 @@ test('subscriptionRows only includes categories that were published', () => {
     ['qib', 'total']
   );
   assert.equal(rows[0].display, '2.50x');
-  const sme = subscriptionRows(makeIpo({ segment: 'SME', subscription: { retail: 1.1 } }));
-  assert.equal(sme[0].label, 'Individual investors');
+  const retail = subscriptionRows(makeIpo({ subscription: { retail: 1.1 } }));
+  assert.equal(retail[0].label, 'Retail');
 });
 
 test('allotmentOdds describes every band without gaps', () => {

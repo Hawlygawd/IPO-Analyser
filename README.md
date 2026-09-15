@@ -14,10 +14,10 @@ the bundled snapshot. No connection, no problem: it falls back to the snapshot a
 | --- | --- |
 | **IPOs** | The board split into *Open / Soon / Closed*, summary tiles (bidding now, opening soon, premium ≥ 12%), sortable lists (closing next, top premium, issue size, A–Z) and a per-card read of price band, premium, subscription, minimum lot and derived demand. |
 | **Watchlist** | Everything you have starred, ordered by the next key date, with the next event up top and the number of queued reminders. |
-| **GMP board** | Every issue ranked by grey market premium with segment filters, "quoted only" / "premium ≥ 12%" toggles, full-text search and a per-row premium bar. |
+| **GMP board** | Every issue ranked by grey market premium with "quoted only" / "premium ≥ 12%" toggles, full-text search and a per-row premium bar. |
 | **IPO detail** | Price ladder (band vs implied listing price), demand score with the reasons behind it, a lot-size calculator with the ₹2 lakh retail limit, category-wise subscription bars with the 1.00x marker, key-date timeline, issue facts and the source of every figure. |
 | **Reminder log** | The reminders this app queued or delivered, plus the plan that will fire next. |
-| **Settings** | System/light/dark theme, per-milestone reminder switches, live-fetch status with a per-source row count, data freshness and provenance, source links, and on-device data controls. |
+| **Settings** | Five short cards - theme, reminder switches, live-data status with a per-source row count and the official source links, the optional AI key, and about/on-device controls. The key card folds its provider/model settings away until you need them. |
 
 Every screen's header carries a status chip: **Live • 5:30 PM** when the last pull reached the
 boards (with the newest upstream stamp), **Snapshot** when the app is running on bundled data.
@@ -83,6 +83,10 @@ release build type at the chosen keystore, detecting JKS vs PKCS#12 from the fil
 The generated `android/` folder is not committed - `expo prebuild` recreates it from `app.json`, so
 the icon, package name (`com.ipopulse.app`), version and permissions all stay declarative.
 
+The app carries **mainboard IPOs only**. SME issues (BSE SME / NSE SME) are left out of the
+bundle and dropped by the live merge even when upstream publishes one, because their lot sizes,
+price bands and demand behave nothing like mainboard ones and a mixed board reads as noise.
+
 ## Where the numbers come from
 
 Two layers, in this order:
@@ -104,12 +108,13 @@ Two layers, in this order:
    same issue, the newer stamp wins for that figure and the publisher travels with it (the detail
    screen reads `GMP quote recorded 14 Sep 2026, 8:45 PM IST · IPO Market`). Where a source is
    older it is ignored - it never overwrites a fresher number, and a name the board does not carry
-   is dropped rather than guessed at. Issues that exist only live (a new SME
-   opening, say) are appended - with derived milestone dates still marked tentative - and an issue
+   is dropped rather than guessed at. Issues that exist only live (a mainboard issue that opened
+   after the snapshot was built) are appended - with derived milestone dates still marked tentative -
+   and an issue
    whose dates upstream has not announced yet is left out rather than given a placeholder date
    (those cards print "TBA" over a `2050-01-01` sentinel upstream, which the parser drops).
 
-2. **The bundled snapshot.** `src/lib/ipoData.ts` ships with the app: 35 curated issues, their
+2. **The bundled snapshot.** `src/lib/ipoData.ts` ships with the app: 18 curated mainboard issues, their
    sectors, lot sizes and issue sizes. It renders instantly on launch, survives being offline, and
    fills in everything the live pages do not carry (sector, lot size, issue size, the written
    analysis). `DATA_AS_OF` stamps it, and the app says *Snapshot* rather than pretending.

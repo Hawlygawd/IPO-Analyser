@@ -41,6 +41,8 @@ export function AiKeyCard({ theme }: { theme: Theme }) {
   const ai = useAi();
   const [draft, setDraft] = useState('');
   const [reveal, setReveal] = useState(false);
+  /** provider, model and the console links only matter when something is wrong, so they start folded */
+  const [open, setOpen] = useState(false);
 
   const saved = Boolean(ai.key);
   const provider = AI_PROVIDERS.find((spec) => spec.id === ai.providerId);
@@ -59,10 +61,10 @@ export function AiKeyCard({ theme }: { theme: Theme }) {
       title="Live data key (AI assist)"
       subtitle={
         saved
-          ? `${ai.keyLabel} • ${ai.stored === 'keychain' ? 'stored in the device keychain' : 'stored on this device'}`
-          : 'Optional. Paste a free-tier API key so a refresh can search the web for the latest figures even when the IPO Ji boards are blocked.'
+          ? `${ai.keyLabel} • ${ai.stored === 'keychain' ? 'device keychain' : 'this device'}`
+          : 'Optional free-tier key: lets a refresh search the web when the boards are blocked.'
       }
-      style={{ marginTop: 14 }}
+      style={{ marginTop: 12 }}
       right={
         saved ? (
           <View
@@ -90,158 +92,175 @@ export function AiKeyCard({ theme }: { theme: Theme }) {
     >
       {saved ? (
         <>
-          <KeyValueRow theme={theme} label="Key" value={ai.keyLabel} />
-          <KeyValueRow theme={theme} label="Detected as" value={ai.shapeLabel || (provider ? provider.label : 'Unknown')} />
           <KeyValueRow
             theme={theme}
-            label="Used on"
-            value={
-              live.ai?.used
-                ? `Last refresh: ${live.ai.rows} rows from ${live.ai.providerLabel}`
-                : ai.enabled
-                  ? 'Refresh (only when the boards fail)'
-                  : 'Paused - boards only'
-            }
+            label="Provider"
+            value={`${provider?.label ?? ai.shapeLabel ?? 'Unknown'}${provider?.freeTier ? ` • ${provider.freeTier}` : ''}`}
             multiline
           />
-          {provider?.freeTier ? (
-            <KeyValueRow theme={theme} label="Provider plan" value={provider.freeTier} multiline />
+          <KeyValueRow
+            theme={theme}
+            label="Model"
+            value={ai.model ?? 'auto (newest the key can reach)'}
+            multiline
+          />
+          {live.ai?.used ? (
+            <KeyValueRow theme={theme} label="Last search" value={`${live.ai.rows} rows from ${live.ai.providerLabel}`} />
           ) : null}
         </>
       ) : null}
 
-      <View style={{ marginTop: saved ? 12 : 2 }}>
-        <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.textMuted, marginBottom: 6 }}>
-          {saved ? 'Replace with a different key' : 'API key'}
-        </Text>
-        <View style={[styles.inputRow, { backgroundColor: theme.cardAlt, borderColor: theme.border }]}>
-          <Ionicons name="key-outline" size={15} color={theme.textMuted} />
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Paste any key - Gemini, OpenAI, NVIDIA, Grok, Groq…"
-            placeholderTextColor={theme.textMuted}
-            accessibilityLabel="API key"
-            autoCapitalize="none"
-            autoCorrect={false}
-            secureTextEntry={!reveal}
-            style={{ flex: 1, color: theme.text, fontSize: 13, paddingVertical: 8 }}
-          />
-          <Pressable
-            onPress={() => setReveal((value) => !value)}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel={reveal ? 'Hide the key' : 'Show the key'}
-          >
-            <Ionicons name={reveal ? 'eye-off-outline' : 'eye-outline'} size={16} color={theme.textMuted} />
-          </Pressable>
-        </View>
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-          <Button
-            theme={theme}
-            label={saved ? 'Save new key' : 'Save key'}
-            icon="save-outline"
-            disabled={draft.trim().length === 0}
-            onPress={save}
-            style={{ flex: 1 }}
-          />
-          {saved ? (
+      {!saved || open ? (
+        <View style={{ marginTop: saved ? 10 : 2 }}>
+          <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.textMuted, marginBottom: 6 }}>
+            {saved ? 'Replace with a different key' : 'API key'}
+          </Text>
+          <View style={[styles.inputRow, { backgroundColor: theme.cardAlt, borderColor: theme.border }]}>
+            <Ionicons name="key-outline" size={15} color={theme.textMuted} />
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Paste any key - Gemini, OpenAI, NVIDIA, Grok, Groq…"
+              placeholderTextColor={theme.textMuted}
+              accessibilityLabel="API key"
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry={!reveal}
+              style={{ flex: 1, color: theme.text, fontSize: 13, paddingVertical: 8 }}
+            />
+            <Pressable
+              onPress={() => setReveal((value) => !value)}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={reveal ? 'Hide the key' : 'Show the key'}
+            >
+              <Ionicons name={reveal ? 'eye-off-outline' : 'eye-outline'} size={16} color={theme.textMuted} />
+            </Pressable>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
             <Button
               theme={theme}
-              label="Remove key"
-              variant="danger"
-              icon="trash-outline"
-              onPress={async () => {
-                await ai.remove();
-                showToast('Key removed from this device', 'info');
-              }}
+              label={saved ? 'Replace' : 'Save key'}
+              icon="save-outline"
+              disabled={draft.trim().length === 0}
+              onPress={save}
+              style={{ flex: 1 }}
             />
+            {saved ? (
+              <Button
+                theme={theme}
+                label="Remove"
+                variant="danger"
+                icon="trash-outline"
+                onPress={async () => {
+                  await ai.remove();
+                  showToast('Key removed from this device', 'info');
+                }}
+              />
           ) : null}
         </View>
         <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 8, lineHeight: 16 }}>
-          The key is saved on this device only - never uploaded, never logged, and used for nothing
-          except your own live-data searches{ai.viaProxy ? '. In this web build the request goes through the app’s own /api/ai route, because browsers are blocked by the provider APIs directly' : ''}.
+          Stored on this device only - never uploaded, never logged.
         </Text>
       </View>
+      ) : null}
 
-      <View style={[styles.divider, { borderTopColor: theme.border }]} />
+      {saved ? (
+        <Pressable
+          onPress={() => setOpen((value) => !value)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          accessibilityLabel={open ? 'Hide provider and model settings' : 'Show provider and model settings'}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10 }}
+        >
+          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={13} color={theme.textMuted} />
+          <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.textMuted }}>
+            {open ? 'Hide provider & model' : 'Provider & model'}
+          </Text>
+        </Pressable>
+      ) : null}
 
-      <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.textMuted, marginBottom: 6 }}>
-        Provider
-      </Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
-        {PICKER.map((id) => {
-          const active = id === 'auto' ? ai.providerId === null : ai.providerId === id;
-          return (
-            <Pressable
-              key={id}
-              onPress={() => ai.setProvider(id === 'auto' ? null : id)}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel={`Use ${chipLabel(id)}`}
-              style={{
-                paddingHorizontal: 11,
-                paddingVertical: 7,
-                borderRadius: radius.pill,
-                borderWidth: 1.5,
-                borderColor: active ? theme.primary : theme.border,
-                backgroundColor: active ? theme.primarySoft : theme.cardAlt,
-              }}
-            >
-              <Text style={{ fontSize: 11.5, fontWeight: '700', color: active ? theme.primary : theme.textSub }}>
-                {chipLabel(id)}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+      {!open ? null : (
+        <>
+        <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.textMuted, marginBottom: 6, marginTop: 4 }}>
+          Provider
+        </Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
+          {PICKER.map((id) => {
+            const active = id === 'auto' ? ai.providerId === null : ai.providerId === id;
+            return (
+              <Pressable
+                key={id}
+                onPress={() => ai.setProvider(id === 'auto' ? null : id)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Use ${chipLabel(id)}`}
+                style={{
+                  paddingHorizontal: 11,
+                  paddingVertical: 7,
+                  borderRadius: radius.pill,
+                  borderWidth: 1.5,
+                  borderColor: active ? theme.primary : theme.border,
+                  backgroundColor: active ? theme.primarySoft : theme.cardAlt,
+                }}
+              >
+                <Text style={{ fontSize: 11.5, fontWeight: '700', color: active ? theme.primary : theme.textSub }}>
+                  {chipLabel(id)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
 
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.textMuted }}>Model</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.textMuted }}>Model</Text>
+            <TextInput
+              value={ai.model ?? ''}
+              onChangeText={(value) => ai.setModel(value.trim() ? value.trim() : null)}
+              placeholder="Auto (cheapest model the key can reach)"
+              placeholderTextColor={theme.textMuted}
+              accessibilityLabel="Model"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[
+                styles.lineInput,
+                { backgroundColor: theme.cardAlt, borderColor: theme.border, color: theme.text },
+              ]}
+            />
+          </View>
+        </View>
+
+        {ai.providerId === 'custom' ? (
           <TextInput
-            value={ai.model ?? ''}
-            onChangeText={(value) => ai.setModel(value.trim() ? value.trim() : null)}
-            placeholder="Auto (cheapest model the key can reach)"
+            value={ai.baseUrl ?? ''}
+            onChangeText={(value) => ai.setBaseUrl(value.trim() ? value.trim() : null)}
+            placeholder="https://your-endpoint.example/v1"
             placeholderTextColor={theme.textMuted}
-            accessibilityLabel="Model"
+            accessibilityLabel="Base URL"
             autoCapitalize="none"
             autoCorrect={false}
             style={[
               styles.lineInput,
-              { backgroundColor: theme.cardAlt, borderColor: theme.border, color: theme.text },
+              { backgroundColor: theme.cardAlt, borderColor: theme.border, color: theme.text, marginTop: 8 },
             ]}
           />
-        </View>
-      </View>
+        ) : null}
 
-      {ai.providerId === 'custom' ? (
-        <TextInput
-          value={ai.baseUrl ?? ''}
-          onChangeText={(value) => ai.setBaseUrl(value.trim() ? value.trim() : null)}
-          placeholder="https://your-endpoint.example/v1"
-          placeholderTextColor={theme.textMuted}
-          accessibilityLabel="Base URL"
-          autoCapitalize="none"
-          autoCorrect={false}
-          style={[
-            styles.lineInput,
-            { backgroundColor: theme.cardAlt, borderColor: theme.border, color: theme.text, marginTop: 8 },
-          ]}
-        />
-      ) : null}
+        </>
+      )}
 
       <View style={[styles.switchRow, { borderTopColor: theme.border }]}>
         <View style={{ flex: 1, paddingRight: 10 }}>
-          <Text style={{ fontSize: 13.5, fontWeight: '700', color: theme.text }}>Use during refresh</Text>
-          <Text style={{ fontSize: 11.5, color: theme.textMuted, marginTop: 2, lineHeight: 16 }}>
-            Spends one search request per refresh, and only when the boards come back empty or fail.
-            {' '}
-            {ai.providerId
-              ? `This key is ${provider?.label ?? ai.providerId}, which ${searchCapability(
+          <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>Use during refresh</Text>
+          <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 2, lineHeight: 15 }}>
+            One search per refresh, and only when the boards fail.
+            {open && ai.providerId
+              ? ` ${provider?.label ?? ai.providerId} ${searchCapability(
                   AI_PROVIDERS.find((spec) => spec.id === ai.providerId) ?? AI_PROVIDERS[0]
                 )}.`
-              : 'A key that cannot search the web is never asked to guess live figures.'}
+              : ''}
           </Text>
         </View>
         <Switch
@@ -381,22 +400,31 @@ export function AiKeyCard({ theme }: { theme: Theme }) {
         style={{ marginTop: 12 }}
       />
 
-      <View style={{ marginTop: 10, gap: 6 }}>
-        {AI_PROVIDERS.filter((spec) => spec.consoleUrl && ['gemini', 'openai', 'nvidia', 'xai', 'groq'].includes(spec.id)).map(
-          (spec) => (
+      {!saved || open ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 10 }}>
+          <Text style={{ fontSize: 11, color: theme.textMuted }}>Free key:</Text>
+          {AI_PROVIDERS.filter(
+            (spec) => spec.consoleUrl && ['gemini', 'openai', 'nvidia', 'xai', 'groq'].includes(spec.id)
+          ).map((spec) => (
             <Pressable
               key={spec.id}
               onPress={() => Linking.openURL(spec.consoleUrl).catch(() => undefined)}
               accessibilityRole="link"
               accessibilityLabel={`Get a ${spec.label} key`}
+              style={{
+                paddingHorizontal: 9,
+                paddingVertical: 4,
+                borderRadius: radius.pill,
+                backgroundColor: theme.cardAlt,
+                borderWidth: 1,
+                borderColor: theme.border,
+              }}
             >
-              <Text style={{ fontSize: 11.5, color: theme.primary, fontWeight: '700' }}>
-                Get a {spec.label} key ({spec.freeTier}) →
-              </Text>
+              <Text style={{ fontSize: 11, color: theme.primary, fontWeight: '700' }}>{spec.label}</Text>
             </Pressable>
-          )
-        )}
-      </View>
+          ))}
+        </View>
+      ) : null}
     </SectionCard>
   );
 }
