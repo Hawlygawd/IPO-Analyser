@@ -186,7 +186,8 @@ jobs:
           one you are looking at: **Live · 5:30 PM** (the newest upstream stamp), or **Snapshot**
           when the boards could not be reached and the bundled figures are shown instead. The
           Settings screen lists each source with its row count and stamp, and issues that only
-          exist live (a new SME opening, for example) are added to the board automatically.
+          exist live (a mainboard issue that opened after the snapshot was built, for example)
+          are added to the board automatically.
 
           **New in 1.5.0 - mainboard only, and a Settings screen you can read.** The board now
           carries mainboard IPOs exclusively: SME issues (BSE SME / NSE SME) are out of the app
