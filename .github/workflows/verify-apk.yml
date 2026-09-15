@@ -1,0 +1,98 @@
+name: Verify APK
+
+# Proves what is inside the APK that is actually published, without rebuilding it: downloads the
+# release asset and checks the things that decide whether it installs and runs - both ARM ABIs,
+# the Hermes bundle, dex code and an apksigner-verified signature. Runs in about a minute, and
+# writes the checksum back to the release so a download can be verified.
+#
+# Triggered by tags like apk-check-1 (the APK workflow, which matches v*, is deliberately not
+# triggered by that name).
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'apk-check-*'
+
+permissions:
+  contents: write
+  checks: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the released APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./app.json').expo.version")"
+          # keep the release's own file name: the published checksum has to name the file a
+          # downloader ends up with, or "sha256sum -c" cannot find it
+          NAME="ipo-pulse-${VERSION}.apk"
+          gh release download "v${VERSION}" --pattern '*.apk' --clobber -O "$NAME"
+          ls -l "$NAME"
+          sha256sum "$NAME" > sha256.txt
+          cat sha256.txt
+
+      - name: Inspect the APK
+        run: |
+          AAPT2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)"
+          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)"
+          VERSION="$(node -p "require('./app.json').expo.version")"
+          APK="ipo-pulse-${VERSION}.apk"
+
+          # release APKs are signed with the APK Signature Scheme (v2/v3), so there are no
+          # META-INF/*.RSA files to look for - apksigner is the check that actually answers
+          # "will Android install this?"; the file keeps the release's own name so the
+          # checksum published next to it can be verified with sha256sum -c
+          SIGNATURE="$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1 | head -12)"
+          {
+            echo "size:    $(du -h "$APK" | cut -f1)"
+            echo "sha256:  $(cut -d' ' -f1 sha256.txt)"
+            echo
+            echo "abis:    $(unzip -l "$APK" | grep -o 'lib/[^/]*/' | sort -u | tr '\n' ' ')"
+            echo "bundle:  $(unzip -l "$APK" | grep -c 'assets/index.android.bundle') file(s)"
+            echo "dex:     $(unzip -l "$APK" | grep -c 'classes.*\.dex') file(s)"
+            echo
+            echo "signature:"
+            echo "$SIGNATURE" | sed 's/^/  /'
+            echo
+            echo "manifest:"
+            # uses-permission matters here: without INTERNET the app installs and then silently
+            # fails every live pull, which is exactly the bug this report has to be able to see
+            "$AAPT2" dump badging "$APK" 2>/dev/null | grep -E "^package|^sdkVersion|^targetSdkVersion|^launchable-activity|^application-label:|^uses-permission" | sed 's/^/  /' || echo "  (aapt2 unavailable)"
+          } | tee apk-report.txt
+
+          fail=0
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/' || { echo "MISSING arm64-v8a native libraries"; fail=1; }
+          unzip -l "$APK" | grep -q 'lib/armeabi-v7a/' || { echo "MISSING armeabi-v7a native libraries"; fail=1; }
+          unzip -l "$APK" | grep -q 'assets/index.android.bundle' || { echo "MISSING the JavaScript bundle - the app would not start"; fail=1; }
+          "$AAPT2" dump badging "$APK" 2>/dev/null | grep -q "uses-permission: name='android.permission.INTERNET'" ||
+            { echo "MISSING the INTERNET permission - every live pull would fail silently"; fail=1; }
+          "$APKSIGNER" verify "$APK" >/dev/null || { echo "the APK signature does not verify - Android would refuse it"; fail=1; }
+          test "$fail" = 0 || exit 1
+          echo "the published APK is complete and its signature verifies"
+
+      - name: Publish the checksum with the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./app.json').expo.version")"
+          cp sha256.txt "ipo-pulse-${VERSION}.apk.sha256"
+          gh release upload "v${VERSION}" "ipo-pulse-${VERSION}.apk.sha256" --clobber
+          echo "checksum published as ipo-pulse-${VERSION}.apk.sha256"
+
+      - name: Publish the report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          jq -Rs '{name: "apk-verification", head_sha: env.SHA, status: "completed", conclusion: "neutral",
+                   output: {title: "Contents of the published APK", summary: .}}' apk-report.txt > payload.json
+          gh api "repos/${{ github.repository }}/check-runs" -X POST --input payload.json >/dev/null &&
+            echo "published the report as a check run" || echo "could not publish the report"

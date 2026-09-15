@@ -1,11 +1,11 @@
 {
-  "name": "expo-router-ts",
-  "version": "1.0.0",
+  "name": "ipo-pulse",
+  "version": "1.5.0",
   "main": "index.ts",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.14",
     "@expo/vector-icons": "^15.1.1",
-    "@react-native-async-storage/async-storage": "^3.1.1",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/bottom-tabs": "^7.18.18",
     "@react-navigation/native": "^7.3.18",
     "@react-navigation/native-stack": "^7.18.10",
@@ -22,21 +22,38 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
-    "react-native-gesture-handler": "^3.2.1",
-    "react-native-reanimated": "^4.6.0",
-    "react-native-safe-area-context": "^5.9.1",
-    "react-native-screens": "^4.27.0",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.1",
+    "react-native-worklets": "0.10.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^22.20.2",
     "@types/react": "~19.2.2",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^25.0.1",
+    "tsx": "^4.20.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "tsx --test src/lib/__tests__/*.test.ts scripts/__tests__/*.test.ts",
+    "test:watch": "tsx --test --watch src/lib/__tests__/*.test.ts",
+    "board": "tsx scripts/board-preview.ts",
+    "build:web": "expo export --platform web --output-dir dist",
+    "check:deps": "tsx scripts/check-native-versions.ts",
+    "apk": "expo prebuild --platform android --no-install && node scripts/android-release.mjs && cd android && ./gradlew assembleRelease",
+    "smoke": "tsx scripts/web-smoke.ts",
+    "smoke:ai": "WEB_AI_FIXTURES=1 tsx scripts/web-smoke.ts",
+    "smoke:live": "WEB_LIVE_FIXTURES=1 tsx scripts/web-smoke.ts",
+    "ai:check": "tsx scripts/ai-key-report.ts --keyless"
   },
   "private": true
 }

@@ -1,161 +1,231 @@
-import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { cardShadow, radius, Theme } from '../theme';
 import { IPO } from '../lib/types';
-import { dateLine, gmpSeries, phaseOf } from '../lib/analysis';
-import { formatRupees, gmpPercent } from '../lib/format';
-import { Avatar, Chip, ChipTone } from './ui';
+import { dateLine, gmpSignal, phaseOf, phaseTone, sentiment, sentimentTone, subscriptionRows } from '../lib/analysis';
+import { formatMultiple, formatRupees, gmpPercent, indicativeListing, lotInvestment, priceBandLabel } from '../lib/format';
+import { Avatar, Chip, MicroLabel, numeric } from './ui';
+import { PremiumBar, premiumTone } from './Charts';
 
-export function phaseTone(phase: string): ChipTone {
-  if (phase === 'open') return 'up';
-  if (phase === 'upcoming') return 'info';
-  if (phase === 'allotment') return 'warn';
-  return 'neutral';
-}
-
-function subscriptionStat(ipo: IPO): { value: string; sub: string } {
-  const s = ipo.subscription;
-  if (s?.total != null) return { value: `${s.total.toFixed(2)}x`, sub: 'Overall' };
-  if (s?.retail != null) return { value: `${s.retail.toFixed(2)}x`, sub: 'Retail' };
-  if (s?.qib != null) return { value: `${s.qib.toFixed(2)}x`, sub: 'QIB' };
-  return { value: '\u2014', sub: phaseOf(ipo).key === 'upcoming' ? 'Not open' : 'Awaiting' };
-}
-
-function gmpStat(ipo: IPO): { value: string; sub: string; tone: ChipTone } {
-  if (ipo.gmp == null) return { value: '\u2014', sub: 'No quote', tone: 'neutral' };
-  const pct = gmpPercent(ipo);
-  const tone: ChipTone = ipo.gmp > 0 ? 'up' : ipo.gmp < 0 ? 'down' : 'neutral';
-  const sign = ipo.gmp > 0 ? '+' : '';
-  return {
-    value: `${sign}${formatRupees(ipo.gmp)}`,
-    sub: pct != null ? `${sign}${pct.toFixed(1)}%` : 'Band TBA',
-    tone,
-  };
-}
-
-function trendStat(ipo: IPO): { dir: 'up' | 'down' | 'flat'; label: string; tone: ChipTone } {
-  const series = gmpSeries(ipo);
-  const delta = series[series.length - 1] - series[0];
-  const pct = gmpPercent(ipo);
-  if (pct != null && pct >= 25 && delta >= 0) return { dir: 'up', label: 'Strong', tone: 'up' };
-  if (delta > 2) return { dir: 'up', label: 'Rising', tone: 'up' };
-  if (delta < -2) return { dir: 'down', label: 'Soft', tone: 'down' };
-  return { dir: 'flat', label: 'Steady', tone: 'neutral' };
-}
-
-export function IPOCard({
-  ipo,
-  theme,
-  onPress,
-  watched,
-  index = 0,
-}: {
+export interface IPOCardProps {
   ipo: IPO;
   theme: Theme;
   onPress: () => void;
   watched?: boolean;
+  onToggleWatch?: (ipo: IPO) => void;
   index?: number;
-}) {
+}
+
+function subscriptionStat(ipo: IPO): { value: string; sub: string } {
+  const s = ipo.subscription;
+  if (s?.total != null) return { value: formatMultiple(s.total), sub: 'Overall' };
+  if (s?.retail != null) return { value: formatMultiple(s.retail), sub: 'Retail' };
+  if (s?.qib != null) return { value: formatMultiple(s.qib), sub: 'QIB' };
+  return { value: '—', sub: phaseOf(ipo).key === 'upcoming' ? 'Not opened' : 'Not published' };
+}
+
+function gmpStat(ipo: IPO): { value: string; sub: string; tone: ReturnType<typeof premiumTone> } {
+  if (ipo.gmp == null) return { value: '—', sub: 'No quote', tone: 'neutral' };
+  const pct = gmpPercent(ipo);
+  const tone = premiumTone(pct);
+  return {
+    value: `${ipo.gmp > 0 ? '+' : ipo.gmp < 0 ? '−' : ''}${formatRupees(Math.abs(ipo.gmp))}`,
+    sub: pct != null ? `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct).toFixed(1)}%` : 'Band TBA',
+    tone,
+  };
+}
+
+export function IPOCard({ ipo, theme, onPress, watched, onToggleWatch, index = 0 }: IPOCardProps) {
   const phase = phaseOf(ipo);
   const gmp = gmpStat(ipo);
   const sub = subscriptionStat(ipo);
-  const trend = trendStat(ipo);
+  const rows = subscriptionRows(ipo);
+  const retail = ipo.subscription?.retail ?? ipo.subscription?.total ?? null;
+  const investment = lotInvestment(ipo);
+  const listing = indicativeListing(ipo);
+  const signal = gmpSignal(ipo);
+  const mood = sentiment(ipo);
+  const moodTone = sentimentTone(mood.score);
+  const pct = gmpPercent(ipo);
+
+  const toneColor =
+    gmp.tone === 'up' ? theme.up : gmp.tone === 'down' ? theme.down : gmp.tone === 'warn' ? theme.warn : theme.text;
 
   return (
-    <Animated.View entering={FadeInDown.delay(Math.min(index, 7) * 45).duration(320)}>
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [
+    <Animated.View entering={FadeInDown.delay(Math.min(index, 7) * 40).duration(300)}>
+      {/*
+        The card body and the watch star are siblings, not nested: nesting one button inside
+        another produces invalid DOM on web and confuses screen readers.
+      */}
+      <View
+        style={[
           styles.card,
           { backgroundColor: theme.card, borderColor: theme.border },
           cardShadow(theme.mode),
-          pressed && { opacity: 0.9, transform: [{ scale: 0.995 }] },
         ]}
       >
-        <View style={styles.topRow}>
-          <Avatar name={ipo.name} theme={theme} size={42} />
-          <View style={styles.titleCol}>
-            <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
-              {ipo.name}
-            </Text>
-            <Text style={[styles.meta, { color: theme.textMuted }]} numberOfLines={1}>
-              {ipo.segment} \u2022 {dateLine(ipo)}
-            </Text>
-          </View>
-          <View style={{ alignItems: 'flex-end', gap: 5 }}>
-            <Chip label={phase.label} tone={phaseTone(phase.key)} theme={theme} small />
-            {watched ? <Ionicons name="star" size={13} color={theme.warn} /> : null}
-          </View>
-        </View>
-
-        <View style={[styles.statRow, { borderTopColor: theme.border }]}>
-          <View style={styles.statCell}>
-            <Text style={[styles.statLabel, { color: theme.textMuted }]}>GMP</Text>
-            <Text style={[styles.statValue, { color: theme[gmp.tone === 'up' ? 'up' : gmp.tone === 'down' ? 'down' : 'text'] }]}>
-              {gmp.value}
-            </Text>
-            <Text style={[styles.statSub, { color: theme.textMuted }]}>{gmp.sub}</Text>
-          </View>
-          <View style={[styles.statCell, { borderLeftWidth: 1, borderLeftColor: theme.border }]}>
-            <Text style={[styles.statLabel, { color: theme.textMuted }]}>Subscription</Text>
-            <Text style={[styles.statValue, { color: theme.text }]}>{sub.value}</Text>
-            <Text style={[styles.statSub, { color: theme.textMuted }]}>{sub.sub}</Text>
-          </View>
-          <View style={[styles.statCell, { borderLeftWidth: 1, borderLeftColor: theme.border }]}>
-            <Text style={[styles.statLabel, { color: theme.textMuted }]}>Trend</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-              <Ionicons
-                name={trend.dir === 'up' ? 'trending-up' : trend.dir === 'down' ? 'trending-down' : 'remove'}
-                size={14}
-                color={theme[trend.tone === 'up' ? 'up' : trend.tone === 'down' ? 'down' : 'neutral']}
-              />
-              <Text
-                style={[
-                  styles.statValue,
-                  { color: theme[trend.tone === 'up' ? 'up' : trend.tone === 'down' ? 'down' : 'text'] },
-                ]}
-              >
-                {trend.label}
+        <Pressable
+          onPress={onPress}
+          accessibilityRole="button"
+          accessibilityLabel={`${ipo.name}, ${ipo.platform} IPO. ${phase.label}. ${
+            ipo.gmp != null ? `Grey market premium ${formatRupees(ipo.gmp)}` : 'No grey market quote'
+          }. ${dateLine(ipo)}.`}
+          accessibilityHint="Opens the full analysis for this IPO"
+          style={({ pressed }) => [styles.pressArea, pressed && { opacity: 0.92 }]}
+        >
+          <View style={styles.topRow}>
+            <Avatar name={ipo.name} theme={theme} size={42} />
+            <View style={styles.titleCol}>
+              <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
+                {ipo.name}
+              </Text>
+              <Text style={[styles.meta, { color: theme.textMuted }]} numberOfLines={1}>
+                {[ipo.platform, ipo.sector].filter(Boolean).join(' • ')}
               </Text>
             </View>
-            <Text style={[styles.statSub, { color: theme.textMuted }]}>
-              {phase.key === 'upcoming' ? 'Pre-market' : '7 sessions'}
-            </Text>
+            <View style={{ alignItems: 'flex-end', gap: 6 }}>
+              <Chip label={phase.label} tone={phaseTone(phase.key)} theme={theme} small />
+              {/* space reserved for the star overlay so the layout does not shift */}
+              <View style={styles.starSlot} />
+            </View>
           </View>
-        </View>
-      </Pressable>
+
+          <View style={[styles.dateRow, { borderTopColor: theme.border }]}>
+            <Ionicons name="calendar-outline" size={13} color={theme.textMuted} />
+            <Text style={[styles.dateText, { color: theme.textSub }]} numberOfLines={1}>
+              {dateLine(ipo)}
+            </Text>
+            <View style={{ flex: 1 }} />
+            <MicroLabel theme={theme}>{signal.label}</MicroLabel>
+          </View>
+
+          {retail != null ? (
+            <View style={styles.barRow}>
+              <PremiumBar pct={pct} theme={theme} width={64} />
+              <Text style={{ fontSize: 11, color: theme.textMuted, fontWeight: '600', flex: 1 }} numberOfLines={1}>
+                {rankHint(rows)}
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={[styles.statRow, { borderTopColor: theme.border }]}>
+            <View style={styles.statCell}>
+              <MicroLabel theme={theme}>GMP / premium</MicroLabel>
+              <Text style={[styles.statValue, numeric, { color: toneColor }]}>{gmp.value}</Text>
+              <Text style={[styles.statSub, { color: theme.textMuted }]} numberOfLines={1}>
+                {listing != null ? `≈ ${formatRupees(listing)} listing` : gmp.sub}
+              </Text>
+            </View>
+            <View style={[styles.statCell, styles.statCellDivider, { borderLeftColor: theme.border }]}>
+              <MicroLabel theme={theme}>Subscription</MicroLabel>
+              <Text style={[styles.statValue, numeric, { color: theme.text }]}>{sub.value}</Text>
+              <Text style={[styles.statSub, { color: theme.textMuted }]} numberOfLines={1}>
+                {sub.sub}
+              </Text>
+            </View>
+            <View style={[styles.statCell, styles.statCellDivider, { borderLeftColor: theme.border }]}>
+              <MicroLabel theme={theme}>{investment != null ? 'Min. lot' : 'Price band'}</MicroLabel>
+              <Text style={[styles.statValue, numeric, { color: theme.text }]} numberOfLines={1}>
+                {investment != null
+                  ? formatRupees(Math.round(investment))
+                  : ipo.priceBandHigh != null
+                    ? priceBandLabel(ipo)
+                    : 'TBA'}
+              </Text>
+              <Text style={[styles.statSub, { color: theme.textMuted }]} numberOfLines={1}>
+                {investment != null
+                  ? `${ipo.lotSize} shares`
+                  : ipo.priceBandHigh != null
+                    ? 'lot size not published'
+                    : 'awaiting RHP'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.footerRow}>
+            <Chip
+              label={`Demand ${mood.label}`}
+              tone={moodTone}
+              theme={theme}
+              small
+              accessibilityLabel={`Derived demand signal: ${mood.label}, score ${mood.score} of 100`}
+            />
+            {ipo.gmp === 0 ? <Chip label="Flat quote" tone="neutral" theme={theme} small /> : null}
+            {ipo.tentativeDates.length > 0 ? (
+              <Chip label="Dates tentative" tone="warn" theme={theme} small icon="alert-circle-outline" />
+            ) : null}
+          </View>
+        </Pressable>
+
+        {onToggleWatch ? (
+          <Pressable
+            onPress={() => onToggleWatch(ipo)}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={watched ? `Remove ${ipo.name} from watchlist` : `Add ${ipo.name} to watchlist`}
+            accessibilityState={{ selected: !!watched }}
+            style={({ pressed }) => [styles.star, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons
+              name={watched ? 'star' : 'star-outline'}
+              size={17}
+              color={watched ? theme.warn : theme.textMuted}
+            />
+          </Pressable>
+        ) : watched ? (
+          <View style={styles.star}>
+            <Ionicons name="star" size={15} color={theme.warn} />
+          </View>
+        ) : null}
+      </View>
     </Animated.View>
   );
+}
+
+function rankHint(rows: { key: string; label: string; display: string }[]): string {
+  if (rows.length === 0) return '';
+  const best = [...rows].sort((a, b) => Number(b.display.replace('x', '')) - Number(a.display.replace('x', '')))[0];
+  return `Strongest category: ${best.label} at ${best.display}`;
 }
 
 const styles = StyleSheet.create({
   card: {
     marginHorizontal: 16,
     marginBottom: 10,
-    padding: 13,
     borderRadius: radius.lg,
     borderWidth: 1,
+    position: 'relative',
   },
+  pressArea: { padding: 13 },
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
   titleCol: { flex: 1, gap: 2 },
   name: { fontSize: 15, fontWeight: '800', letterSpacing: -0.2 },
   meta: { fontSize: 11.5, fontWeight: '600' },
-  statRow: {
+  starSlot: { width: 34, height: 17 },
+  star: {
+    position: 'absolute',
+    top: 44,
+    right: 6,
+    width: 40,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateRow: {
     flexDirection: 'row',
-    marginTop: 12,
-    paddingTop: 11,
-    borderTopWidth: 1,
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 11,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
+  dateText: { fontSize: 11.5, fontWeight: '600' },
+  barRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 9 },
+  statRow: { flexDirection: 'row', marginTop: 11, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth },
   statCell: { flex: 1, paddingHorizontal: 2 },
-  statLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
-    marginBottom: 3,
-  },
+  statCellDivider: { borderLeftWidth: StyleSheet.hairlineWidth, paddingLeft: 10 },
   statValue: { fontSize: 14, fontWeight: '800', letterSpacing: -0.2 },
-  statSub: { fontSize: 10.5, marginTop: 1.5, fontWeight: '600' },
+  statSub: { fontSize: 10.5, marginTop: 2, fontWeight: '600' },
+  footerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' },
 });

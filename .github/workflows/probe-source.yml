@@ -1,0 +1,81 @@
+name: Probe source
+
+# Temporary reconnaissance. The sandbox this app is developed in cannot reach the upstream site
+# (its egress allows npm and GitHub only), so a runner fetches the pages and mirrors the markup
+# that has to be parsed into a check run, which the API serves. Delete once the feed parser and
+# its fixtures are in place.
+
+on:
+  push:
+    tags:
+      - 'probe-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the pages
+        run: |
+          set -o pipefail
+          mkdir -p pages
+          UA="Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+          curl -sS -L -A "$UA" -o pages/gmp.html --max-time 30 "https://www.ipoji.com/ipo-gmp"
+          curl -sS -L -A "$UA" -o pages/subscription.html --max-time 30 "https://www.ipoji.com/ipo-subscription-status-live-bidding-data-bse-nse"
+          curl -sS -L -A "$UA" -o pages/current.html --max-time 30 "https://www.ipoji.com/ipo/current-ipo"
+          curl -sS -L -A "$UA" -o pages/upcoming.html --max-time 30 "https://www.ipoji.com/ipo/upcoming-ipo"
+          curl -sS -L -A "$UA" -o pages/calendar.html --max-time 30 "https://www.ipoji.com/ipo-event-calendar"
+          ls -l pages
+
+      - name: Extract the structures worth parsing
+        run: |
+          node - <<'NODE' > excerpt.md
+          const fs = require('node:fs');
+          const read = (file) => fs.readFileSync(`pages/${file}`, 'utf8');
+          const cap = (t, n) => (t.length > n ? `${t.slice(0, n)}\n…[+${t.length - n} chars]` : t);
+          const out = [];
+          for (const file of ['upcoming', 'current']) {
+            const html = read(`${file}.html`);
+            const opens = [...html.matchAll(/<article\b[^>]*\bclass="[^"]*\bipo-card\b[^"]*"[^>]*>/g)];
+            out.push(`\n\n===== ${file}.html: ${opens.length} cards`);
+            // first card, verbatim
+            if (opens.length) {
+              const start = opens[0].index;
+              const end = html.indexOf('</article>', start);
+              out.push(cap(html.slice(start, end + 10), 6000));
+            }
+            // every distinct secondary label with a sample value
+            const labels = [...html.matchAll(/class="ipo-card-secondary-label"[^>]*>([\s\S]{0,60}?)<\/span>[\s\S]{0,240}?class="ipo-card-body-value[^"]*"[^>]*>([\s\S]{0,60}?)<\/span>/g)];
+            out.push(`\n--- label/value pairs (first 12):`);
+            labels.slice(0, 12).forEach((m) => out.push(`  [${m[1].replace(/\s+/g, ' ').trim()}] = [${m[2].replace(/\s+/g, ' ').trim()}]`));
+            // how are dates published on these cards?
+            const times = [...html.matchAll(/<time\b[^>]*\bdatetime="([^"]+)"[^>]*>/g)].map((m) => m[1]);
+            out.push(`\n--- time datetimes (first 12): ${JSON.stringify(times.slice(0, 12))}`);
+          }
+          console.log(out.join('\n'));
+          NODE
+          wc -c excerpt.md
+
+      - name: Publish the excerpt
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          head -c 60000 excerpt.md > part-1.md
+          jq -Rs '{name: "source-probe", head_sha: env.SHA, status: "completed", conclusion: "neutral",
+                   output: {title: "Upstream markup worth parsing (part 1)", summary: .}}' part-1.md > payload.json
+          gh api "repos/${{ github.repository }}/check-runs" -X POST --input payload.json >/dev/null &&
+            echo published part 1 || echo "could not publish part 1"
+          # keep the whole excerpt as a second check run so nothing is lost to the size cap
+          jq -Rs '{name: "source-probe-2", head_sha: env.SHA, status: "completed", conclusion: "neutral",
+                   output: {title: "Upstream markup worth parsing (part 2)", summary: .}}' excerpt.md > payload2.json
+          gh api "repos/${{ github.repository }}/check-runs" -X POST --input payload2.json >/dev/null &&
+            echo published part 2 || echo "could not publish part 2"

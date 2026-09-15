@@ -1,5 +1,14 @@
-import React, { useMemo } from 'react';
-import { Linking, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import {
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,31 +16,58 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { getIpo } from '../lib/ipoData';
-import { gmpPercent, formatCr, formatDay, formatRupees, lotInvestment } from '../lib/format';
-import { computeTrend, gmpSeries, insights, nextMilestone, phaseOf, sentiment } from '../lib/analysis';
-import { Avatar, Button, Chip, Row, SectionCard } from '../components/ui';
-import { GmpBarChart, SubscriptionBars } from '../components/Charts';
+import { DATA_SOURCE_LABEL } from '../lib/ipoData';
+import {
+  formatCr,
+  formatDay,
+  formatIstTime,
+  formatPct,
+  formatRupees,
+  gmpPercent,
+  indicativeListing,
+  lotInvestment,
+  priceBandLabel,
+} from '../lib/format';
+import {
+  allotmentOdds,
+  dateLine,
+  gmpSignal,
+  gmpUpdatedLabel,
+  insights,
+  nextMilestone,
+  phaseOf,
+  phaseTone,
+  sentiment,
+  sentimentTone,
+  subscriptionRows,
+} from '../lib/analysis';
+import { Avatar, Button, Chip, KeyValueRow, MicroLabel, ProgressMeter, Row, SectionCard, numeric } from '../components/ui';
+import { PriceLadder, SubscriptionBars } from '../components/Charts';
 import { MilestoneTimeline } from '../components/Milestone';
 import { ScreenHeader } from '../components/ScreenHeader';
-import { phaseTone } from '../components/IPOCard';
 import { RootStackParamList } from '../navigation/types';
+
+/** Retail investors can bid for at most ₹2 lakh in an IPO (SEBI limit). */
+const RETAIL_CAP = 200000;
 
 export function IPODetailScreen({ theme }: { theme: Theme }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'IPODetail'>>();
   const insets = useSafeAreaInsets();
-  const { isWatched, toggleWatch, permission } = useStore();
+  const { isWatched, toggleWatch, permission, showToast, enableNotifications, findIpo, boardAsOfLabel, live } =
+    useStore();
+  const [lots, setLots] = useState(1);
 
-  const ipo = getIpo(route.params.id);
+  const ipo = findIpo(route.params.id);
 
   const analysis = useMemo(() => {
     if (!ipo) return null;
     return {
-      series: gmpSeries(ipo),
-      trend: computeTrend(ipo),
+      signal: gmpSignal(ipo),
       sentiment: sentiment(ipo),
       points: insights(ipo),
+      rows: subscriptionRows(ipo),
+      odds: allotmentOdds(ipo),
     };
   }, [ipo]);
 
@@ -48,117 +84,215 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
   const pct = gmpPercent(ipo);
   const watched = isWatched(ipo.id);
   const milestone = nextMilestone(ipo);
-  const investment = lotInvestment(ipo);
-  const s = ipo.subscription;
+  const oneLot = lotInvestment(ipo);
+  const cost = lotInvestment(ipo, lots);
+  const listing = indicativeListing(ipo);
+  const moodTone = sentimentTone(analysis.sentiment.score);
+  const overRetailCap = cost != null && cost > RETAIL_CAP;
+
+  const shareText = [
+    `${ipo.name} (${ipo.platform})`,
+    priceBandLabel(ipo),
+    ipo.gmp != null
+      ? `Grey market premium ${formatRupees(ipo.gmp)}${pct != null ? ` (${formatPct(pct)})` : ''}`
+      : 'No grey market quote recorded',
+    listing != null ? `Indicative listing ${formatRupees(listing)}` : null,
+    `${dateLine(ipo)} • source: ${ipo.sourceName}`,
+    `Shared from IPO Pulse (${live.fetchedAt ? 'live' : 'snapshot'} ${boardAsOfLabel})`,
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const onShare = async () => {
     try {
-      await Share.share({
-        message: `${ipo.name} IPO (${ipo.segment})\nGMP: ${ipo.gmp != null ? `${formatRupees(ipo.gmp)} (${pct != null ? `${pct.toFixed(1)}%` : 'band TBA'})` : 'n/a'}\nOpens ${formatDay(ipo.openDate, true)} \u2022 ${ipo.exchanges.join(' & ')}\n\nShared from IPO Pulse`,
-      });
+      await Share.share({ message: shareText });
+      return;
     } catch {
-      // user cancelled
+      // fall through to the clipboard / toast fallback
+    }
+    const clipboard = (globalThis as any)?.navigator?.clipboard;
+    if (Platform.OS === 'web' && clipboard?.writeText) {
+      try {
+        await clipboard.writeText(shareText);
+        showToast('Details copied to the clipboard', 'up');
+        return;
+      } catch {
+        // ignore and fall through
+      }
+    }
+    showToast('Sharing is not available on this device', 'warn');
+  };
+
+  const onOpenSource = async () => {
+    try {
+      await Linking.openURL(ipo.sourceUrl);
+    } catch {
+      showToast('Could not open the source link', 'down');
     }
   };
+
+  const facts: { label: string; value: string }[] = [
+    { label: 'Issue type', value: ipo.issueType ?? 'TBA' },
+    {
+      label: 'Platform',
+      value:
+        ipo.exchanges.length > 0
+          ? `${ipo.platform} • lists on ${ipo.exchanges.join(' & ')}`
+          : ipo.platform,
+    },
+    { label: 'Lot size', value: ipo.lotSize != null ? `${ipo.lotSize} shares` : 'TBA' },
+    { label: 'Min. investment', value: oneLot != null ? formatRupees(Math.round(oneLot)) : 'TBA' },
+    { label: 'Price band', value: priceBandLabel(ipo) },
+    { label: 'Issue size', value: formatCr(ipo.issueSizeCr) },
+    ...(ipo.sector ? [{ label: 'Sector', value: ipo.sector }] : []),
+    { label: 'Bidding window', value: `${formatDay(ipo.openDate)} – ${formatDay(ipo.closeDate)}` },
+  ];
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <ScreenHeader
         theme={theme}
         title={ipo.name}
-        subtitle={`${ipo.segment} \u2022 ${ipo.sector}`}
+        subtitle={`${ipo.platform} • ${ipo.sector ?? 'Mainboard'}`}
         onBack={() => navigation.goBack()}
         right={
-          <Pressable
-            onPress={onShare}
-            style={({ pressed }) => [styles.iconBtn, { backgroundColor: theme.card, borderColor: theme.border }, pressed && { opacity: 0.7 }]}
-          >
-            <Ionicons name="share-outline" size={18} color={theme.text} />
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {!watched ? (
+              <Pressable
+                onPress={() => toggleWatch(ipo)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`Add ${ipo.name} to watchlist and set reminders`}
+                style={({ pressed }) => [
+                  styles.iconBtn,
+                  { backgroundColor: theme.card, borderColor: theme.border },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Ionicons name="star-outline" size={18} color={theme.text} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={onShare}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Share these IPO details"
+              style={({ pressed }) => [
+                styles.iconBtn,
+                { backgroundColor: theme.card, borderColor: theme.border },
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Ionicons name="share-outline" size={18} color={theme.text} />
+            </Pressable>
+          </View>
         }
       />
 
       <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: 130 + insets.bottom }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 140 + insets.bottom }}
         showsVerticalScrollIndicator={false}
       >
         {/* Hero */}
         <Animated.View
-          entering={FadeInDown.duration(320)}
+          entering={FadeInDown.duration(300)}
           style={[styles.hero, { backgroundColor: theme.card, borderColor: theme.border }]}
         >
-          <Row style={{ gap: 12 }}>
+          <Row style={{ gap: 12 }} align="flex-start">
             <Avatar name={ipo.name} theme={theme} size={52} />
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ fontSize: 17, fontWeight: '800', color: theme.text, letterSpacing: -0.3 }} numberOfLines={2}>
                 {ipo.name}
               </Text>
-              <Row style={{ gap: 6, marginTop: 5 }}>
+              <Text style={{ fontSize: 12, color: theme.textMuted, marginTop: 3, fontWeight: '600' }}>
+                {dateLine(ipo)}
+              </Text>
+              <Row style={{ gap: 6, marginTop: 7 }} wrap>
                 <Chip label={phase.label} tone={phaseTone(phase.key)} theme={theme} small />
-                <Chip label={`${milestone.label} ${formatDay(milestone.date)}`} tone="neutral" theme={theme} small />
+                {ipo.platform === 'NSE' || ipo.platform === 'BSE' ? null : (
+                  <Chip label={ipo.platform} tone="neutral" theme={theme} small />
+                )}
+                {milestone ? (
+                  <Chip label={`${milestone.label} ${formatDay(milestone.date)}`} tone="info" theme={theme} small />
+                ) : null}
               </Row>
             </View>
           </Row>
 
+          <View style={{ marginTop: 14 }}>
+            <PriceLadder ipo={ipo} theme={theme} />
+          </View>
+
           <View style={[styles.heroStats, { borderTopColor: theme.border }]}>
             <HeroStat
               theme={theme}
-              label="Price band"
-              value={ipo.priceBandHigh ? `\u20B9${ipo.priceBandLow}\u2013\u20B9${ipo.priceBandHigh}` : 'TBA'}
+              label="GMP"
+              value={ipo.gmp != null ? `${ipo.gmp > 0 ? '+' : ipo.gmp < 0 ? '−' : ''}${formatRupees(Math.abs(ipo.gmp))}` : '—'}
+              sub={pct != null ? formatPct(pct) : 'band TBA'}
+              tone={analysis.signal.tone === 'down' ? 'down' : analysis.signal.tone === 'up' ? 'up' : undefined}
             />
-            <HeroStat theme={theme} label="Lot size" value={ipo.lotSize ? `${ipo.lotSize} sh` : 'TBA'} />
-            <HeroStat theme={theme} label="Issue size" value={formatCr(ipo.issueSizeCr)} />
             <HeroStat
               theme={theme}
-              label="GMP"
-              value={ipo.gmp != null ? `${ipo.gmp > 0 ? '+' : ''}${formatRupees(ipo.gmp)}` : '\u2014'}
-              sub={pct != null ? `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%` : 'band TBA'}
-              tone={ipo.gmp == null ? 'neutral' : ipo.gmp > 0 ? 'up' : ipo.gmp < 0 ? 'down' : 'neutral'}
+              label="Indicative list"
+              value={listing != null ? formatRupees(listing) : '—'}
+              sub={ipo.priceBandHigh != null ? `vs band ${formatRupees(ipo.priceBandHigh)}` : 'band TBA'}
+            />
+            <HeroStat
+              theme={theme}
+              label="Min. lot"
+              value={oneLot != null ? formatRupees(Math.round(oneLot)) : 'TBA'}
+              sub={ipo.lotSize != null ? `${ipo.lotSize} shares` : 'lot size TBA'}
             />
           </View>
         </Animated.View>
 
         {/* Analysis */}
-        <Animated.View entering={FadeInDown.delay(60).duration(320)}>
-          <SectionCard theme={theme} title="Analysis" style={{ marginTop: 14 }}>
-            <Row style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-              <Text style={{ fontSize: 13, color: theme.textSub, fontWeight: '600' }}>Grey market mood</Text>
-              <Text
-                style={{
-                  fontSize: 13,
-                  fontWeight: '800',
-                  color: analysis.sentiment.score >= 64 ? theme.up : analysis.sentiment.score >= 45 ? theme.warn : theme.down,
-                }}
-              >
-                {analysis.sentiment.label}
-              </Text>
-            </Row>
-            <View style={[styles.meterTrack, { backgroundColor: theme.neutralSoft }]}>
-              <View
-                style={{
-                  width: `${analysis.sentiment.score}%`,
-                  height: '100%',
-                  borderRadius: radius.pill,
-                  backgroundColor:
-                    analysis.sentiment.score >= 64 ? theme.up : analysis.sentiment.score >= 45 ? theme.warn : theme.down,
-                }}
-              />
-            </View>
-
-            <View style={{ marginTop: 18 }}>
-              <Text style={{ fontSize: 11, fontWeight: '800', color: theme.textMuted, letterSpacing: 0.6, marginBottom: 10 }}>
-                GMP \u2022 LAST 7 SESSIONS (\u20B9)
-              </Text>
-              <GmpBarChart
+        <Animated.View entering={FadeInDown.delay(50).duration(300)}>
+          <SectionCard
+            theme={theme}
+            title="Demand signal"
+            subtitle="Derived from the premium and the recorded subscription - not a prediction"
+            right={
+              <Chip
+                label={`${analysis.sentiment.label} ${analysis.sentiment.score}`}
+                tone={moodTone}
                 theme={theme}
-                values={analysis.series}
-                labels={[formatDay(ipo.openDate), 'Today']}
+                small
               />
+            }
+            style={{ marginTop: 14 }}
+          >
+            <ProgressMeter
+              value={analysis.sentiment.score}
+              tone={moodTone}
+              theme={theme}
+              accessibilityLabel={`Demand score ${analysis.sentiment.score} out of 100: ${analysis.sentiment.label}`}
+            />
+            <Row justify="space-between" style={{ marginTop: 6 }}>
+              <Text style={{ fontSize: 10.5, color: theme.textMuted, fontWeight: '700' }}>WEAK</Text>
+              <Text style={{ fontSize: 10.5, color: theme.textMuted, fontWeight: '700' }}>STRONG</Text>
+            </Row>
+
+            <View style={{ marginTop: 14, gap: 8 }}>
+              {analysis.sentiment.reasons.map((reason) => (
+                <Row key={reason} gap={8} align="flex-start">
+                  <Ionicons name="ellipse" size={6} color={theme.primary} style={{ marginTop: 6 }} />
+                  <Text style={{ flex: 1, fontSize: 12.5, color: theme.textSub, lineHeight: 18 }}>{reason}</Text>
+                </Row>
+              ))}
             </View>
 
-            <View style={{ marginTop: 16, gap: 10 }}>
+            <View style={[styles.noteBox, { backgroundColor: theme.cardAlt }]}>
+              <Ionicons name="information-circle-outline" size={15} color={theme.info} />
+              <Text style={{ flex: 1, fontSize: 11.5, color: theme.textSub, lineHeight: 17 }}>
+                {analysis.signal.detail}
+                {ipo.gmpUpdated ? ` (${gmpUpdatedLabel(ipo)})` : ''}
+              </Text>
+            </View>
+
+            <View style={{ marginTop: 16, gap: 8 }}>
               {analysis.points.map((point) => (
-                <Row key={point} style={{ gap: 8, alignItems: 'flex-start' }}>
+                <Row key={point} gap={8} align="flex-start">
                   <Ionicons name="checkmark-circle" size={15} color={theme.primary} style={{ marginTop: 1 }} />
                   <Text style={{ flex: 1, fontSize: 13, color: theme.textSub, lineHeight: 19 }}>{point}</Text>
                 </Row>
@@ -167,76 +301,176 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
           </SectionCard>
         </Animated.View>
 
-        {/* Subscription */}
-        {s ? (
-          <Animated.View entering={FadeInDown.delay(110).duration(320)}>
+        {/* Lot calculator */}
+        {oneLot != null ? (
+          <Animated.View entering={FadeInDown.delay(90).duration(300)}>
             <SectionCard
               theme={theme}
-              title="Subscription"
-              right={<Chip label={s.asOf ?? 'Final'} tone="info" theme={theme} small />}
+              title="What would it cost?"
+              subtitle={`${ipo.lotSize} shares a lot at the upper band of ${formatRupees(ipo.priceBandHigh ?? 0)}`}
               style={{ marginTop: 14 }}
             >
-              <SubscriptionBars
-                theme={theme}
-                rows={[
-                  s.qib != null ? { label: 'QIB', value: s.qib, display: `${s.qib.toFixed(2)}x`, tone: 'info' as const } : null,
-                  s.nii != null ? { label: 'NII / HNI', value: s.nii, display: `${s.nii.toFixed(2)}x`, tone: 'up' as const } : null,
-                  s.retail != null ? { label: 'Retail', value: s.retail, display: `${s.retail.toFixed(2)}x`, tone: 'up' as const } : null,
-                  s.total != null ? { label: 'Overall', value: s.total, display: `${s.total.toFixed(2)}x`, tone: 'warn' as const } : null,
-                ].filter((r): r is NonNullable<typeof r> => r != null)}
-              />
+              <Row justify="space-between">
+                <View>
+                  <MicroLabel theme={theme}>Lots to apply for</MicroLabel>
+                  <Row gap={12} style={{ marginTop: 8 }}>
+                    <Stepper
+                      icon="remove"
+                      theme={theme}
+                      label="Decrease the number of lots"
+                      disabled={lots <= 1}
+                      onPress={() => setLots((n) => Math.max(1, n - 1))}
+                    />
+                    <Text style={[styles.lotsValue, numeric, { color: theme.text }]}>{lots}</Text>
+                    <Stepper
+                      icon="add"
+                      theme={theme}
+                      label="Increase the number of lots"
+                      disabled={lots >= 20}
+                      onPress={() => setLots((n) => Math.min(20, n + 1))}
+                    />
+                  </Row>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <MicroLabel theme={theme}>You pay</MicroLabel>
+                  <Text style={[styles.costValue, numeric, { color: overRetailCap ? theme.down : theme.text }]}>
+                    {formatRupees(Math.round(cost ?? 0))}
+                  </Text>
+                  <Text style={{ fontSize: 10.5, color: theme.textMuted, fontWeight: '600' }}>
+                    {lots} × {formatRupees(Math.round(oneLot))}
+                  </Text>
+                </View>
+              </Row>
+
+              <View style={[styles.noteBox, { backgroundColor: overRetailCap ? theme.downSoft : theme.cardAlt, marginTop: 12 }]}>
+                <Ionicons
+                  name={overRetailCap ? 'alert-circle-outline' : 'information-circle-outline'}
+                  size={15}
+                  color={overRetailCap ? theme.down : theme.info}
+                />
+                <Text style={{ flex: 1, fontSize: 11.5, color: theme.textSub, lineHeight: 17 }}>
+                  {overRetailCap
+                    ? `Above the ₹2,00,000 retail limit - this application would move into the NII (HNI) category.`
+                    : `Retail applications can go up to ₹2,00,000 (about ${Math.floor(RETAIL_CAP / oneLot)} lots here). The amount is blocked in your bank until allotment, not debited.`}
+                </Text>
+              </View>
             </SectionCard>
           </Animated.View>
-        ) : (
-          <Animated.View entering={FadeInDown.delay(110).duration(320)}>
-            <SectionCard theme={theme} title="Subscription" style={{ marginTop: 14 }}>
+        ) : null}
+
+        {/* Subscription */}
+        <Animated.View entering={FadeInDown.delay(120).duration(300)}>
+          <SectionCard
+            theme={theme}
+            title="Subscription"
+            subtitle={ipo.subscription?.asOf ? `Recorded ${ipo.subscription.asOf}` : undefined}
+            right={
+              ipo.subscription?.asOf ? <Chip label="Category-wise" tone="info" theme={theme} small /> : undefined
+            }
+            style={{ marginTop: 14 }}
+          >
+            {analysis.rows.length > 0 ? (
+              <>
+                <SubscriptionBars rows={analysis.rows} theme={theme} />
+                {analysis.odds ? (
+                  <Text style={{ fontSize: 12, color: theme.textSub, marginTop: 14, lineHeight: 18 }}>
+                    {analysis.odds}
+                  </Text>
+                ) : null}
+              </>
+            ) : (
               <Text style={{ fontSize: 13, color: theme.textSub, lineHeight: 20 }}>
-                Bidding has not started yet. Category-wise subscription updates appear here from the opening day.
+                {phase.key === 'upcoming'
+                  ? 'Bidding has not opened yet. Category-wise subscription appears here from the opening day.'
+                  : 'No category-wise subscription figures were published for this issue by the tracker.'}
               </Text>
-            </SectionCard>
-          </Animated.View>
-        )}
+            )}
+          </SectionCard>
+        </Animated.View>
 
         {/* Timeline */}
-        <Animated.View entering={FadeInDown.delay(160).duration(320)}>
-          <SectionCard theme={theme} title="IPO timeline" style={{ marginTop: 14 }}>
+        <Animated.View entering={FadeInDown.delay(150).duration(300)}>
+          <SectionCard theme={theme} title="Key dates" style={{ marginTop: 14 }}>
             <MilestoneTimeline ipo={ipo} theme={theme} />
           </SectionCard>
         </Animated.View>
 
-        {/* About */}
-        <Animated.View entering={FadeInDown.delay(210).duration(320)}>
-          <SectionCard theme={theme} title="About the issue" style={{ marginTop: 14 }}>
+        {/* Facts */}
+        <Animated.View entering={FadeInDown.delay(180).duration(300)}>
+          <SectionCard theme={theme} title="Issue facts" style={{ marginTop: 14 }}>
             <Text style={{ fontSize: 13.5, color: theme.textSub, lineHeight: 20.5 }}>{ipo.about}</Text>
-
-            <View style={styles.factGrid}>
-              <Fact label="Issue type" value={ipo.issueType ?? 'TBA'} theme={theme} />
-              <Fact label="Listing on" value={ipo.exchanges.join(' & ')} theme={theme} />
-              <Fact label="Min. investment" value={investment != null ? formatRupees(Math.round(investment)) : 'TBA'} theme={theme} />
-              <Fact label="Sector" value={ipo.sector} theme={theme} />
+            <View style={{ marginTop: 10 }}>
+              {facts.map((fact) => (
+                <KeyValueRow key={fact.label} theme={theme} label={fact.label} value={fact.value} />
+              ))}
             </View>
+          </SectionCard>
+        </Animated.View>
 
-            <Pressable
-              onPress={() => Linking.openURL(ipo.sourceUrl).catch(() => undefined)}
-              style={({ pressed }) => [
-                styles.sourceRow,
-                { backgroundColor: theme.cardAlt, borderColor: theme.border },
-                pressed && { opacity: 0.75 },
-              ]}
-            >
-              <Ionicons name="document-text-outline" size={17} color={theme.primary} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>RHP, dates & live updates</Text>
-                <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 1 }}>via {ipo.sourceName}</Text>
-              </View>
-              <Ionicons name="open-outline" size={15} color={theme.textMuted} />
-            </Pressable>
+        {/* Source */}
+        <Animated.View entering={FadeInDown.delay(210).duration(300)}>
+          <SectionCard theme={theme} title="Where this came from" style={{ marginTop: 14 }}>
+            <KeyValueRow theme={theme} label="Source" value={ipo.sourceName} />
+            <KeyValueRow
+              theme={theme}
+              label={live.state === 'ai' ? 'Last live update' : live.fetchedAt ? 'Last live update' : 'Board snapshot'}
+              value={
+                live.fetchedAt
+                  ? `${boardAsOfLabel} (${
+                      live.state === 'ai'
+                        ? `AI web search via ${live.ai?.providerLabel ?? 'your key'}`
+                        : DATA_SOURCE_LABEL
+                    })`
+                  : boardAsOfLabel
+              }
+              multiline
+            />
+            {ipo.aiFilled ? (
+              <KeyValueRow
+                theme={theme}
+                label="Filled by AI search"
+                value={live.ai ? `${live.ai.providerLabel} • ${live.ai.model}` : 'your saved key'}
+                tone="info"
+                multiline
+              />
+            ) : null}
+            {ipo.aiFilled && ipo.aiSourceUrl ? (
+              <KeyValueRow
+                theme={theme}
+                label="AI source page"
+                value="Open"
+                tone="primary"
+                icon="open-outline"
+                onPress={() => Linking.openURL(ipo.aiSourceUrl as string).catch(() => undefined)}
+              />
+            ) : null}
+            {ipo.gmpUpdated ? (
+              <KeyValueRow
+                theme={theme}
+                label="GMP quote recorded"
+                value={`${formatIstTime(ipo.gmpUpdated)} IST${ipo.gmpSource ? ` • ${ipo.gmpSource}` : ''}`}
+                multiline
+              />
+            ) : null}
+            <Button
+              theme={theme}
+              label="Open the source page"
+              variant="ghost"
+              icon="open-outline"
+              onPress={onOpenSource}
+              style={{ marginTop: 12 }}
+            />
+            <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 10, lineHeight: 16 }}>
+              {ipo.aiFilled
+                ? 'Some figures on this issue came from an AI web search rather than from a published board, and are marked as such. Open the source page and confirm on the exchange or registrar before you bid.'
+                : 'Figures are a copy of what the tracker published. Always confirm dates and subscription on the exchange or registrar before you bid.'}
+            </Text>
           </SectionCard>
         </Animated.View>
 
         <Text style={[styles.disclaimer, { color: theme.textMuted }]}>
-          Data is indicative and sourced from public trackers. Grey market premiums are unofficial and
-          subject to change. This is not investment advice.
+          Grey market premiums are unofficial, unregulated and can change without notice. Nothing in this app is
+          investment advice.
         </Text>
       </ScrollView>
 
@@ -253,19 +487,66 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
       >
         <Button
           theme={theme}
-          label={watched ? 'Watching \u2022 reminders on' : 'Add to watchlist'}
-          icon={watched ? 'notifications' : 'add'}
+          label={watched ? 'Watching' : 'Watch + reminders'}
+          icon={watched ? 'star' : 'star-outline'}
           variant={watched ? 'soft' : 'primary'}
           onPress={() => toggleWatch(ipo)}
+          accessibilityHint={
+            watched ? 'Stops reminders for this IPO' : 'Adds this IPO and queues reminders for its key dates'
+          }
           style={{ flex: 1 }}
         />
-        {!watched && permission !== 'granted' ? (
-          <Pressable onPress={() => navigation.navigate('Alerts')} style={{ paddingHorizontal: 4 }}>
-            <Ionicons name="notifications-off-outline" size={20} color={theme.textMuted} />
-          </Pressable>
+        {watched && (permission === 'denied' || permission === 'undetermined') ? (
+          <Button
+            theme={theme}
+            label="Enable alerts"
+            variant="ghost"
+            icon="notifications-outline"
+            onPress={enableNotifications}
+            accessibilityHint="Asks the system for permission to post reminders"
+          />
         ) : null}
       </View>
     </View>
+  );
+}
+
+function Stepper({
+  icon,
+  onPress,
+  theme,
+  label,
+  disabled,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+  theme: Theme;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
+      style={({ pressed }) => [
+        {
+          width: 38,
+          height: 38,
+          borderRadius: 19,
+          borderWidth: 1,
+          borderColor: disabled ? theme.border : theme.primary,
+          backgroundColor: disabled ? theme.cardAlt : theme.primarySoft,
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}
+    >
+      <Ionicons name={icon} size={17} color={disabled ? theme.textMuted : theme.primary} />
+    </Pressable>
   );
 }
 
@@ -280,38 +561,28 @@ function HeroStat({
   label: string;
   value: string;
   sub?: string;
-  tone?: 'up' | 'down' | 'neutral';
+  tone?: 'up' | 'down';
 }) {
   const color = tone === 'up' ? theme.up : tone === 'down' ? theme.down : theme.text;
   return (
     <View style={{ flex: 1 }}>
-      <Text style={{ fontSize: 9.5, fontWeight: '700', letterSpacing: 0.6, color: theme.textMuted, textTransform: 'uppercase' }}>
-        {label}
-      </Text>
-      <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '800', color, marginTop: 3, letterSpacing: -0.2 }}>
+      <MicroLabel theme={theme}>{label}</MicroLabel>
+      <Text numberOfLines={1} style={[styles.heroStatValue, numeric, { color }]}>
         {value}
       </Text>
-      {sub ? <Text style={{ fontSize: 10, color: theme.textMuted, marginTop: 1 }}>{sub}</Text> : null}
-    </View>
-  );
-}
-
-function Fact({ theme, label, value }: { theme: Theme; label: string; value: string }) {
-  return (
-    <View style={{ width: '50%', paddingVertical: 7 }}>
-      <Text style={{ fontSize: 10.5, fontWeight: '700', color: theme.textMuted, letterSpacing: 0.4, textTransform: 'uppercase' }}>
-        {label}
-      </Text>
-      <Text numberOfLines={2} style={{ fontSize: 13, fontWeight: '700', color: theme.text, marginTop: 3 }}>
-        {value}
-      </Text>
+      {sub ? (
+        <Text numberOfLines={1} style={{ fontSize: 10, color: theme.textMuted, marginTop: 1, fontWeight: '600' }}>
+          {sub}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   hero: { borderRadius: radius.lg, borderWidth: 1, padding: 14, gap: 14 },
-  heroStats: { flexDirection: 'row', borderTopWidth: 1, paddingTop: 13, gap: 8 },
+  heroStats: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 13, gap: 8 },
+  heroStatValue: { fontSize: 14.5, fontWeight: '800', marginTop: 3, letterSpacing: -0.2 },
   iconBtn: {
     width: 38,
     height: 38,
@@ -320,17 +591,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  meterTrack: { height: 8, borderRadius: radius.pill, overflow: 'hidden' },
-  factGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 12 },
-  sourceRow: {
+  noteBox: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    padding: 12,
+    gap: 9,
+    padding: 11,
     borderRadius: radius.md,
-    borderWidth: 1,
     marginTop: 14,
+    alignItems: 'flex-start',
   },
+  lotsValue: { fontSize: 26, fontWeight: '800', minWidth: 42, textAlign: 'center', letterSpacing: -0.5 },
+  costValue: { fontSize: 22, fontWeight: '800', marginTop: 4, letterSpacing: -0.5 },
   disclaimer: { fontSize: 11, textAlign: 'center', marginTop: 20, lineHeight: 16, paddingHorizontal: 10 },
   actionBar: {
     position: 'absolute',

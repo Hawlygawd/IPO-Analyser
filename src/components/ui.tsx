@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -10,15 +11,75 @@ import {
   ViewStyle,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { AVATAR_COLORS, cardShadow, radius, Theme } from '../theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AVATAR_COLORS, cardShadow, floatingShadow, radius, Theme } from '../theme';
 import { colorFromString, initials } from '../lib/format';
 
-/* ------------------------------------------------------------------ Avatar */
+/** Figures line up in columns when the platform font supports tabular numerals. */
+export const numeric: TextStyle = { fontVariant: ['tabular-nums'] };
 
-export function Avatar({ name, size = 44, theme }: { name: string; size?: number; theme: Theme }) {
+const USE_NATIVE_DRIVER = Platform.OS !== 'web';
+
+/* ------------------------------------------------------------------ layout */
+
+export function Row({
+  children,
+  style,
+  gap,
+  align = 'center',
+  justify,
+  wrap,
+}: {
+  children: React.ReactNode;
+  style?: ViewStyle | ViewStyle[];
+  gap?: number;
+  align?: ViewStyle['alignItems'];
+  justify?: ViewStyle['justifyContent'];
+  wrap?: boolean;
+}) {
+  return (
+    <View
+      style={[
+        {
+          flexDirection: 'row',
+          alignItems: align,
+          justifyContent: justify,
+          gap,
+          flexWrap: wrap ? 'wrap' : 'nowrap',
+        },
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
+
+/** Small uppercase label used above figures and in section headers. */
+export function MicroLabel({
+  children,
+  theme,
+  style,
+}: {
+  children: React.ReactNode;
+  theme: Theme;
+  style?: TextStyle;
+}) {
+  return (
+    <Text style={[styles.micro, { color: theme.textMuted }, style]} numberOfLines={1}>
+      {children}
+    </Text>
+  );
+}
+
+/* ------------------------------------------------------------------ avatar */
+
+export function Avatar({ name, size = 44 }: { name: string; size?: number; theme?: Theme }) {
   const bg = colorFromString(name, AVATAR_COLORS);
   return (
     <View
+      accessibilityElementsHidden
+      importantForAccessibility="no"
       style={{
         width: size,
         height: size,
@@ -35,9 +96,10 @@ export function Avatar({ name, size = 44, theme }: { name: string; size?: number
   );
 }
 
-/* -------------------------------------------------------------------- Chips */
+/* ------------------------------------------------------------------- chips */
 
 export type ChipTone = 'up' | 'down' | 'warn' | 'info' | 'neutral' | 'primary';
+export type ChipSize = 'sm' | 'md';
 
 const TONE_BG: Record<ChipTone, keyof Theme> = {
   up: 'upSoft',
@@ -56,107 +118,157 @@ const TONE_FG: Record<ChipTone, keyof Theme> = {
   primary: 'primary',
 };
 
+export function chipColors(theme: Theme, tone: ChipTone) {
+  return { bg: theme[TONE_BG[tone]] as string, fg: theme[TONE_FG[tone]] as string };
+}
+
 export function Chip({
   label,
   tone = 'neutral',
   theme,
   small,
+  size,
   icon,
+  accessibilityLabel,
 }: {
   label: string;
   tone?: ChipTone;
   theme: Theme;
   small?: boolean;
+  size?: ChipSize;
   icon?: keyof typeof Ionicons.glyphMap;
+  accessibilityLabel?: string;
 }) {
-  const bg = theme[TONE_BG[tone]] as string;
-  const fg = theme[TONE_FG[tone]] as string;
+  const s: ChipSize = size ?? (small ? 'sm' : 'md');
+  const { bg, fg } = chipColors(theme, tone);
   return (
     <View
+      accessibilityLabel={accessibilityLabel ?? label}
       style={{
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
         backgroundColor: bg,
-        paddingHorizontal: small ? 7 : 9,
-        paddingVertical: small ? 3 : 4.5,
+        paddingHorizontal: s === 'sm' ? 7 : 9,
+        paddingVertical: s === 'sm' ? 3 : 4.5,
         borderRadius: radius.pill,
+        alignSelf: 'flex-start',
       }}
     >
-      {icon ? <Ionicons name={icon} size={small ? 10 : 12} color={fg} /> : null}
-      <Text style={{ color: fg, fontSize: small ? 10.5 : 11.5, fontWeight: '700' }}>{label}</Text>
+      {icon ? <Ionicons name={icon} size={s === 'sm' ? 10 : 12} color={fg} /> : null}
+      <Text style={{ color: fg, fontSize: s === 'sm' ? 10.5 : 11.5, fontWeight: '700' }} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
   );
 }
 
-/* ------------------------------------------------------------ Section card */
+/* ------------------------------------------------------------- section card */
 
 export function SectionCard({
   theme,
   title,
+  subtitle,
   right,
   children,
   style,
+  contentStyle,
 }: {
   theme: Theme;
   title?: string;
+  subtitle?: string;
   right?: React.ReactNode;
   children: React.ReactNode;
-  style?: ViewStyle;
+  style?: ViewStyle | ViewStyle[];
+  contentStyle?: ViewStyle;
 }) {
   return (
     <View
       style={[
-        { backgroundColor: theme.card, borderRadius: radius.lg, borderWidth: 1, borderColor: theme.border, padding: 14 },
+        styles.card,
+        { backgroundColor: theme.card, borderColor: theme.border },
         cardShadow(theme.mode),
         style,
       ]}
     >
       {title ? (
         <View style={styles.sectionHead}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
+          <View style={{ flex: 1 }}>
+            <Text
+              accessibilityRole="header"
+              style={[styles.sectionTitle, { color: theme.text }]}
+              numberOfLines={1}
+            >
+              {title}
+            </Text>
+            {subtitle ? (
+              <Text
+                style={{ fontSize: 11.5, color: theme.textMuted, marginTop: 2, fontWeight: '600' }}
+                numberOfLines={2}
+              >
+                {subtitle}
+              </Text>
+            ) : null}
+          </View>
           {right}
         </View>
       ) : null}
-      {children}
+      <View style={contentStyle}>{children}</View>
     </View>
   );
 }
 
-/* ---------------------------------------------------------------- Stat cell */
-
-export function StatCell({
+export function KeyValueRow({
+  theme,
   label,
   value,
-  sub,
   tone,
-  theme,
-  align = 'flex-start',
+  onPress,
+  icon,
+  multiline,
 }: {
+  theme: Theme;
   label: string;
   value: string;
-  sub?: string;
-  tone?: ChipTone;
-  theme: Theme;
-  align?: ViewStyle['alignItems'];
+  tone?: 'text' | 'up' | 'down' | 'warn' | 'info' | 'primary';
+  onPress?: () => void;
+  icon?: keyof typeof Ionicons.glyphMap;
+  multiline?: boolean;
 }) {
-  const color = tone ? (theme[TONE_FG[tone]] as string) : theme.text;
-  return (
-    <View style={{ flex: 1, alignItems: align }}>
-      <Text style={[styles.statLabel, { color: theme.textMuted }]}>{label}</Text>
-      <Text style={[styles.statValue, { color }]} numberOfLines={1}>
+  const content = (
+    <Row style={styles.kvRow} gap={12} align="flex-start">
+      <Text style={{ flex: 1, fontSize: 12.5, color: theme.textMuted, fontWeight: '600' }}>{label}</Text>
+      <Text
+        numberOfLines={multiline ? 3 : 1}
+        style={{
+          flexShrink: 1,
+          maxWidth: '62%',
+          fontSize: 12.5,
+          fontWeight: '700',
+          color: (theme[tone ?? 'text'] as string) ?? theme.text,
+          textAlign: 'right',
+        }}
+      >
         {value}
       </Text>
-      {sub ? (
-        <Text style={[styles.statSub, { color: theme.textMuted }]} numberOfLines={1}>
-          {sub}
-        </Text>
-      ) : null}
-    </View>
+      {icon ? <Ionicons name={icon} size={14} color={theme.textMuted} /> : null}
+    </Row>
+  );
+
+  if (!onPress) return content;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value}`}
+      style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+    >
+      {content}
+    </Pressable>
   );
 }
 
-/* ------------------------------------------------------------------ Buttons */
+/* ----------------------------------------------------------------- buttons */
 
 export function Button({
   label,
@@ -165,47 +277,154 @@ export function Button({
   variant = 'primary',
   icon,
   disabled,
+  loading,
   style,
+  accessibilityLabel,
+  accessibilityHint,
 }: {
   label: string;
   onPress: () => void;
   theme: Theme;
-  variant?: 'primary' | 'ghost' | 'soft';
+  variant?: 'primary' | 'ghost' | 'soft' | 'danger';
   icon?: keyof typeof Ionicons.glyphMap;
   disabled?: boolean;
-  style?: ViewStyle;
+  loading?: boolean;
+  style?: ViewStyle | ViewStyle[];
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }) {
   const bg =
-    variant === 'primary' ? theme.primary : variant === 'soft' ? theme.primarySoft : 'transparent';
-  const fg = variant === 'primary' ? theme.onPrimary : theme.primary;
+    variant === 'primary'
+      ? theme.primary
+      : variant === 'soft'
+        ? theme.primarySoft
+        : variant === 'danger'
+          ? theme.downSoft
+          : 'transparent';
+  const fg =
+    variant === 'primary' ? theme.onPrimary : variant === 'danger' ? theme.down : theme.primary;
   const border: ViewStyle = variant === 'ghost' ? { borderWidth: 1, borderColor: theme.border } : {};
+  const isDisabled = disabled || loading;
+
   return (
     <Pressable
       onPress={onPress}
-      disabled={disabled}
+      disabled={isDisabled}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: !!isDisabled, busy: !!loading }}
       style={({ pressed }) => [
         {
           backgroundColor: bg,
           borderRadius: radius.pill,
           paddingVertical: 12,
           paddingHorizontal: 18,
+          minHeight: 44,
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
           gap: 7,
-          opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
+          opacity: isDisabled ? 0.5 : pressed ? 0.85 : 1,
         },
         border,
         style,
       ]}
     >
-      {icon ? <Ionicons name={icon} size={16} color={fg} /> : null}
-      <Text style={{ color: fg, fontWeight: '700', fontSize: 14 }}>{label}</Text>
+      {loading ? (
+        <ActivityIndicator size="small" color={fg} />
+      ) : icon ? (
+        <Ionicons name={icon} size={16} color={fg} />
+      ) : null}
+      <Text style={{ color: fg, fontWeight: '700', fontSize: 14 }} numberOfLines={1}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
 
-/* -------------------------------------------------------------- Empty state */
+export function IconButton({
+  icon,
+  onPress,
+  theme,
+  accessibilityLabel,
+  size = 38,
+  tone = 'text',
+  badge,
+  active,
+  style,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+  theme: Theme;
+  accessibilityLabel: string;
+  size?: number;
+  tone?: 'text' | 'primary' | 'warn' | 'down';
+  badge?: boolean;
+  active?: boolean;
+  style?: ViewStyle;
+}) {
+  const fg = theme[tone] as string;
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={10}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ selected: !!active }}
+      style={({ pressed }) => [
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          borderWidth: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: active ? theme.primarySoft : theme.card,
+          borderColor: active ? theme.primary : theme.border,
+          opacity: pressed ? 0.7 : 1,
+        },
+        style,
+      ]}
+    >
+      <Ionicons name={icon} size={size * 0.5} color={active ? theme.primary : fg} />
+      {badge ? (
+        <View style={[styles.badgeDot, { backgroundColor: theme.down, borderColor: theme.card }]} />
+      ) : null}
+    </Pressable>
+  );
+}
+
+/* ------------------------------------------------------------------ meter */
+
+export function ProgressMeter({
+  value,
+  theme,
+  tone = 'primary',
+  height = 8,
+  accessibilityLabel,
+}: {
+  value: number;
+  theme: Theme;
+  tone?: 'primary' | 'up' | 'warn' | 'down' | 'info';
+  height?: number;
+  accessibilityLabel?: string;
+}) {
+  const pct = Math.max(2, Math.min(100, value));
+  const color = theme[tone] as string;
+  return (
+    <View
+      accessibilityRole="progressbar"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(pct) }}
+      style={[styles.meterTrack, { backgroundColor: theme.neutralSoft, height }]}
+    >
+      <View style={{ width: `${pct}%`, height: '100%', borderRadius: radius.pill, backgroundColor: color }} />
+    </View>
+  );
+}
+
+/* ------------------------------------------------------------- empty state */
 
 export function EmptyState({
   theme,
@@ -237,109 +456,138 @@ export function EmptyState({
       >
         <Ionicons name={icon} size={30} color={theme.primary} />
       </View>
-      <Text style={[styles.emptyTitle, { color: theme.text }]}>{title}</Text>
+      <Text accessibilityRole="header" style={[styles.emptyTitle, { color: theme.text }]}>
+        {title}
+      </Text>
       <Text style={[styles.emptyMsg, { color: theme.textSub }]}>{message}</Text>
       {actionLabel && onAction ? (
-        <Button label={actionLabel} onPress={onAction} theme={theme} style={{ marginTop: 18, minWidth: 190 }} />
+        <Button
+          label={actionLabel}
+          onPress={onAction}
+          theme={theme}
+          style={{ marginTop: 18, minWidth: 190 }}
+        />
       ) : null}
     </View>
   );
 }
 
-/* ----------------------------------------------------------------- Skeleton */
+/* ------------------------------------------------------------------ toast */
 
-function Pulse({ children, theme }: { children: React.ReactNode; theme: Theme }) {
-  const value = useRef(new Animated.Value(0.45)).current;
+export function ToastHost({
+  message,
+  tone = 'info',
+  theme,
+  onDismiss,
+}: {
+  message: string;
+  tone?: 'info' | 'up' | 'down' | 'warn';
+  theme: Theme;
+  onDismiss: () => void;
+}) {
+  const anim = useRef(new Animated.Value(0)).current;
+  const insets = useSafeAreaInsets();
+
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(value, { toValue: 1, duration: 750, useNativeDriver: true }),
-        Animated.timing(value, { toValue: 0.45, duration: 750, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [value]);
+    Animated.spring(anim, {
+      toValue: 1,
+      useNativeDriver: USE_NATIVE_DRIVER,
+      damping: 18,
+      stiffness: 220,
+    }).start();
+  }, [anim]);
+
+  const { bg, fg } = chipColors(theme, tone);
+  const icon =
+    tone === 'up' ? 'checkmark-circle' : tone === 'down' ? 'alert-circle' : 'information-circle';
+
   return (
-    <Animated.View style={{ opacity: value, backgroundColor: theme.card, borderRadius: radius.lg }}>
-      {children}
+    <Animated.View
+      style={[
+        styles.toastWrap,
+        {
+          pointerEvents: 'box-none',
+          // anchored to the top so it can never cover the sticky action bar
+          top: insets.top + 10,
+          opacity: anim,
+          transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) }],
+        },
+      ]}
+    >
+      <Pressable
+        onPress={onDismiss}
+        accessibilityRole="button"
+        accessibilityLabel={`${message}. Dismiss.`}
+        style={[
+          styles.toast,
+          floatingShadow(theme.mode),
+          { backgroundColor: theme.card, borderColor: theme.border },
+        ]}
+      >
+        <View
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 13,
+            backgroundColor: bg,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Ionicons name={icon} size={15} color={fg} />
+        </View>
+        <Text
+          style={{ flex: 1, fontSize: 12.5, fontWeight: '700', color: theme.text, lineHeight: 17 }}
+          numberOfLines={3}
+        >
+          {message}
+        </Text>
+      </Pressable>
     </Animated.View>
   );
 }
 
-export function CardSkeleton({ theme }: { theme: Theme }) {
-  return (
-    <Pulse theme={theme}>
-      <View style={[styles.skeletonCard, { borderColor: theme.border }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: theme.neutralSoft }} />
-          <View style={{ flex: 1, gap: 7 }}>
-            <View style={{ height: 12, width: '58%', borderRadius: 6, backgroundColor: theme.neutralSoft }} />
-            <View style={{ height: 9, width: '38%', borderRadius: 5, backgroundColor: theme.neutralSoft }} />
-          </View>
-          <View style={{ width: 56, height: 20, borderRadius: 10, backgroundColor: theme.neutralSoft }} />
-        </View>
-        <View style={{ flexDirection: 'row', gap: 16, marginTop: 14 }}>
-          <View style={{ height: 26, width: 74, borderRadius: 6, backgroundColor: theme.neutralSoft }} />
-          <View style={{ height: 26, width: 74, borderRadius: 6, backgroundColor: theme.neutralSoft }} />
-          <View style={{ height: 26, width: 74, borderRadius: 6, backgroundColor: theme.neutralSoft }} />
-        </View>
-      </View>
-    </Pulse>
-  );
-}
-
-export function Spinner({ theme, label }: { theme: Theme; label?: string }) {
-  return (
-    <View style={{ padding: 24, alignItems: 'center', gap: 10 }}>
-      <ActivityIndicator color={theme.primary} />
-      {label ? <Text style={{ color: theme.textMuted, fontSize: 12.5 }}>{label}</Text> : null}
-    </View>
-  );
-}
-
-/* ------------------------------------------------------------------ Helpers */
-
-export function Row({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
-  return <View style={[{ flexDirection: 'row', alignItems: 'center' }, style]}>{children}</View>;
-}
-
-export function Divider({ theme }: { theme: Theme }) {
-  return <View style={{ height: 1, backgroundColor: theme.border }} />;
-}
-
-export function textVariants(theme: Theme) {
-  const h1: TextStyle = { fontSize: 26, fontWeight: '800', color: theme.text, letterSpacing: -0.4 };
-  const h2: TextStyle = { fontSize: 18, fontWeight: '800', color: theme.text, letterSpacing: -0.2 };
-  const sub: TextStyle = { fontSize: 13, color: theme.textSub, lineHeight: 19 };
-  return { h1, h2, sub };
-}
-
 const styles = StyleSheet.create({
+  card: { borderRadius: radius.lg, borderWidth: 1, padding: 14 },
   sectionHead: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
+    gap: 10,
     marginBottom: 12,
   },
   sectionTitle: { fontSize: 15, fontWeight: '800', letterSpacing: -0.1 },
-  statLabel: {
-    fontSize: 9.5,
-    fontWeight: '700',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
-    marginBottom: 2,
-  },
-  statValue: { fontSize: 14, fontWeight: '800', letterSpacing: -0.2 },
-  statSub: { fontSize: 10.5, marginTop: 1 },
+  micro: { fontSize: 9.5, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase' },
+  kvRow: { paddingVertical: 6 },
+  meterTrack: { borderRadius: radius.pill, overflow: 'hidden' },
   empty: { alignItems: 'center', paddingHorizontal: 30, paddingVertical: 44 },
   emptyTitle: { fontSize: 16.5, fontWeight: '800', marginBottom: 6, textAlign: 'center' },
   emptyMsg: { fontSize: 13.5, textAlign: 'center', lineHeight: 20 },
-  skeletonCard: {
-    marginHorizontal: 16,
-    marginBottom: 10,
-    padding: 14,
-    borderRadius: radius.lg,
+  badgeDot: {
+    position: 'absolute',
+    top: 6,
+    right: 7,
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    borderWidth: 1.5,
+  },
+  toastWrap: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    alignItems: 'center',
+    zIndex: 40,
+  },
+  toast: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: radius.md,
     borderWidth: 1,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    maxWidth: 520,
+    width: '100%',
   },
 });

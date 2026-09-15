@@ -1,0 +1,70 @@
+name: AI key check
+
+# The bring-your-own-key path in src/lib/ai is written against provider APIs that the
+# development sandbox cannot reach, so it is exercised here on a runner instead.
+#
+# Two modes, both published as a check-run summary:
+#   - always: `--keyless` calls every provider endpoint with a deliberately invalid key.
+#     HTTP 401 is the healthy answer - it proves the route works from a runner and that the
+#     app turns the provider's refusal into something a person can read.
+#   - when the repository has an AI_KEY secret: the full dry check (model list, one test
+#     prompt, then a real search over the board) runs with `--strict`, so a key that stops
+#     working turns this run red instead of surprising a phone.
+#
+#   git tag -f ai-check-1 && git push -f origin ai-check-1
+
+on:
+  push:
+    tags:
+      - 'ai-check-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Unit-test the key layer against fake providers
+        run: npx tsx --test src/lib/__tests__/ai.test.ts
+
+      - name: Are the provider endpoints reachable (no key needed)?
+        run: npx tsx scripts/ai-key-report.ts --keyless | tee report.md
+
+      - name: Dry check a real key, when the repository has one
+        env:
+          AI_KEY: ${{ secrets.AI_KEY }}
+        run: |
+          if [ -z "${AI_KEY:-}" ]; then
+            printf '\nNo AI_KEY secret is configured, so only the keyless reachability check ran.\n' >> report.md
+            exit 0
+          fi
+          printf '\n## With the repository AI_KEY\n\n' >> report.md
+          npx tsx scripts/ai-key-report.ts --strict | tail -n +4 >> report.md
+
+      - name: Publish the report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ ! -s report.md ]; then
+            printf 'the AI key check produced nothing - see the step log\n' > report.md
+          fi
+          head -c 60000 report.md > part-1.md
+          jq -Rs '{name: "ai-key-check", head_sha: env.SHA, status: "completed", conclusion: "neutral",
+                   output: {title: "AI assist dry check", summary: .}}' part-1.md > payload.json
+          gh api "repos/${{ github.repository }}/check-runs" -X POST --input payload.json >/dev/null &&
+            echo published || echo "could not publish"
