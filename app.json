@@ -1,19 +1,23 @@
 {
   "expo": {
-    "name": "Agon Preview",
-    "slug": "agon-preview",
-    "version": "1.0.0",
+    "name": "IPO Pulse",
+    "slug": "ipo-pulse",
+    "version": "1.6.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "description": "Indian IPO calendar, subscription figures, GMP context, and reminders.",
+    "scheme": "ipopulse",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ipopulse.app"
     },
     "android": {
+      "package": "com.ipopulse.app",
+      "versionCode": 7,
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#08785C",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
@@ -26,18 +30,9 @@
         }
       ]
     ],
-    "extra": {
-      "eas": {
-        "projectId": "552f0665-e30d-4f11-9ea9-97bc22a22809"
-      }
-    },
     "updates": {
-      "url": "https://u.expo.dev/552f0665-e30d-4f11-9ea9-97bc22a22809"
+      "enabled": false
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "owner": "arcadalabs",
     "platforms": [
       "ios",
       "android",
