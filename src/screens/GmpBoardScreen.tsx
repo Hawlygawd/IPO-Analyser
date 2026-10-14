@@ -1,14 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { IPOT, DATA_AS_OF_LABEL } from '../lib/ipoData';
-import { gmpPercent } from '../lib/format';
-import { computeTrend, gmpSeries } from '../lib/analysis';
+import { formatUpdatedAt, gmpPercent } from '../lib/format';
+import { computeTrend, phaseOf } from '../lib/analysis';
 import { Avatar, EmptyState } from '../components/ui';
 import { SegmentedTabs } from '../components/SegmentedTabs';
 import { ScreenHeader } from '../components/ScreenHeader';
@@ -18,18 +17,18 @@ type Filter = 'all' | 'mainboard' | 'sme' | 'gainers';
 
 export function GmpBoardScreen({ theme }: { theme: Theme }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { isWatched } = useStore();
+  const { isWatched, ipos, lastRefresh, dataMode } = useStore();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const scored = IPOT.map((ipo) => {
-      const pct = gmpPercent(ipo);
-      const series = gmpSeries(ipo);
-      const delta = series[series.length - 1] - series[0];
-      return { ipo, pct, delta, trend: computeTrend(ipo) };
-    });
+    const scored = ipos
+      .filter((ipo) => ['open', 'upcoming'].includes(phaseOf(ipo).key))
+      .map((ipo) => {
+        const pct = gmpPercent(ipo);
+        return { ipo, pct, trend: computeTrend(ipo) };
+      });
     const filtered = scored.filter((row) => {
       if (q && !row.ipo.name.toLowerCase().includes(q) && !row.ipo.sector.toLowerCase().includes(q)) return false;
       if (filter === 'mainboard') return row.ipo.segment === 'Mainboard';
@@ -39,7 +38,7 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
     });
     filtered.sort((a, b) => (b.pct ?? -999) - (a.pct ?? -999));
     return filtered;
-  }, [query, filter]);
+  }, [ipos, query, filter]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -47,7 +46,7 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
         theme={theme}
         large
         title="GMP board"
-        subtitle={`Grey market premium \u2022 as of ${DATA_AS_OF_LABEL}`}
+        subtitle={`Grey market premium \u2022 ${dataMode === 'live' ? 'Live' : dataMode === 'limited' ? 'Preview' : dataMode === 'cached' ? 'Cached' : 'Checking'}${lastRefresh ? ` · ${formatUpdatedAt(lastRefresh)}` : ''}`}
       />
 
       <View style={{ paddingHorizontal: 16, gap: 12, paddingBottom: 12 }}>
@@ -90,6 +89,7 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
         showsVerticalScrollIndicator={false}
         renderItem={({ item, index }) => {
           const { ipo, pct, trend } = item;
+          const guruSource = ipo.sources?.find((source) => source.name.toLowerCase().includes('ipo guru'));
           const tone = pct == null ? 'neutral' : pct >= 12 ? 'up' : pct >= 0 ? 'warn' : 'down';
           const fg = tone === 'up' ? theme.up : tone === 'warn' ? theme.warn : tone === 'down' ? theme.down : theme.textMuted;
           return (
@@ -111,6 +111,18 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
                   <Text numberOfLines={1} style={{ fontSize: 11, color: theme.textMuted, marginTop: 2, fontWeight: '600' }}>
                     {ipo.segment} \u2022 {ipo.gmp != null ? `GMP ${ipo.gmp > 0 ? '+' : ''}\u20B9${ipo.gmp}` : 'No quote'}
                   </Text>
+                  {guruSource ? (
+                    <Text
+                      accessibilityRole="link"
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        void Linking.openURL(guruSource.url ?? 'https://www.ipoguru.in/').catch(() => undefined);
+                      }}
+                      style={{ fontSize: 9, color: theme.primary, fontWeight: '700', textDecorationLine: 'underline', marginTop: 2 }}
+                    >
+                      Data by IPO Guru
+                    </Text>
+                  ) : null}
                 </View>
                 {isWatched(ipo.id) ? <Ionicons name="star" size={13} color={theme.warn} /> : null}
                 <View style={{ alignItems: 'flex-end', minWidth: 66 }}>

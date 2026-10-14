@@ -1,9 +1,9 @@
 {
-  "buildCommand": null,
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/((?!_expo|assets|.*\\..*).*)",
+      "source": "/((?!_expo|assets|api|.*\\..*).*)",
       "destination": "/index.html"
     }
   ]

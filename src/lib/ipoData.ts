@@ -1,15 +1,14 @@
 import { IPO } from './types';
 
 /**
- * Curated IPO board.
- * GMP + subscription figures cross-checked against public trackers
- * (ipoji.com, ipowatch.in, ipocentral.in, ET Now, NDTV Profit, Groww blog)
- * as of 5 September 2026, 7:45 PM IST.
+ * Bundled offline reference snapshot. This is not the live board; refresh data
+ * through the multi-source feed before relying on dates or subscription values.
+ * Snapshot: 5 September 2026, 7:45 PM IST.
  */
 export const DATA_AS_OF = '2026-09-05T19:45:00+05:30';
 export const DATA_AS_OF_LABEL = '5 Sep 2026, 7:45 PM IST';
 
-export const IPOT: IPO[] = [
+export const BUNDLED_IPOS: IPO[] = [
   {
     id: 'kanohar-electricals',
     name: 'Kanohar Electricals',
@@ -347,12 +346,3 @@ export const IPOT: IPO[] = [
     sourceUrl: 'https://ipowatch.in/upcoming-ipo-list/',
   },
 ];
-
-export const IPO_BY_ID: Record<string, IPO> = IPOT.reduce((acc, ipo) => {
-  acc[ipo.id] = ipo;
-  return acc;
-}, {} as Record<string, IPO>);
-
-export function getIpo(id: string): IPO | undefined {
-  return IPO_BY_ID[id];
-}

@@ -1,11 +1,11 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { cardShadow, radius, Theme } from '../theme';
 import { IPO } from '../lib/types';
 import { dateLine, gmpSeries, phaseOf } from '../lib/analysis';
-import { formatRupees, gmpPercent } from '../lib/format';
+import { formatRupees, gmpPercent, subscriptionCategoryRows } from '../lib/format';
 import { Avatar, Chip, ChipTone } from './ui';
 
 export function phaseTone(phase: string): ChipTone {
@@ -15,15 +15,25 @@ export function phaseTone(phase: string): ChipTone {
   return 'neutral';
 }
 
-function subscriptionStat(ipo: IPO): { value: string; sub: string } {
-  const s = ipo.subscription;
-  if (s?.total != null) return { value: `${s.total.toFixed(2)}x`, sub: 'Overall' };
-  if (s?.retail != null) return { value: `${s.retail.toFixed(2)}x`, sub: 'Retail' };
-  if (s?.qib != null) return { value: `${s.qib.toFixed(2)}x`, sub: 'QIB' };
-  return { value: '\u2014', sub: phaseOf(ipo).key === 'upcoming' ? 'Not open' : 'Awaiting' };
+function subscriptionStat(ipo: IPO) {
+  const categories = subscriptionCategoryRows(ipo.subscription);
+  if (categories.length) return { categories, overall: undefined, emptyLabel: undefined };
+  if (ipo.subscription?.total != null) {
+    return {
+      categories: [],
+      overall: `${ipo.subscription.total.toFixed(2)}x`,
+      emptyLabel: 'Overall',
+    };
+  }
+  return {
+    categories: [],
+    overall: '\u2014',
+    emptyLabel: phaseOf(ipo).key === 'upcoming' ? 'Not open' : 'Awaiting',
+  };
 }
 
 function gmpStat(ipo: IPO): { value: string; sub: string; tone: ChipTone } {
+  if (phaseOf(ipo).key === 'listed') return { value: '\u2014', sub: 'Already listed', tone: 'neutral' };
   if (ipo.gmp == null) return { value: '\u2014', sub: 'No quote', tone: 'neutral' };
   const pct = gmpPercent(ipo);
   const tone: ChipTone = ipo.gmp > 0 ? 'up' : ipo.gmp < 0 ? 'down' : 'neutral';
@@ -36,7 +46,11 @@ function gmpStat(ipo: IPO): { value: string; sub: string; tone: ChipTone } {
 }
 
 function trendStat(ipo: IPO): { dir: 'up' | 'down' | 'flat'; label: string; tone: ChipTone } {
+  if (phaseOf(ipo).key === 'listed') return { dir: 'flat', label: 'Listed', tone: 'neutral' };
   const series = gmpSeries(ipo);
+  if (series.length < 2) {
+    return { dir: 'flat', label: ipo.gmp == null ? 'Awaiting' : 'Latest', tone: 'neutral' };
+  }
   const delta = series[series.length - 1] - series[0];
   const pct = gmpPercent(ipo);
   if (pct != null && pct >= 25 && delta >= 0) return { dir: 'up', label: 'Strong', tone: 'up' };
@@ -62,6 +76,7 @@ export function IPOCard({
   const gmp = gmpStat(ipo);
   const sub = subscriptionStat(ipo);
   const trend = trendStat(ipo);
+  const guruSource = ipo.sources?.find((source) => source.name.toLowerCase().includes('ipo guru'));
 
   return (
     <Animated.View entering={FadeInDown.delay(Math.min(index, 7) * 45).duration(320)}>
@@ -100,11 +115,26 @@ export function IPOCard({
           </View>
           <View style={[styles.statCell, { borderLeftWidth: 1, borderLeftColor: theme.border }]}>
             <Text style={[styles.statLabel, { color: theme.textMuted }]}>Subscription</Text>
-            <Text style={[styles.statValue, { color: theme.text }]}>{sub.value}</Text>
-            <Text style={[styles.statSub, { color: theme.textMuted }]}>{sub.sub}</Text>
+            {sub.categories.length ? (
+              <View style={{ gap: 1 }}>
+                {sub.categories.slice(0, 4).map((row) => (
+                  <Text key={row.key} numberOfLines={1} style={[styles.categoryValue, { color: theme.text }]}>
+                    {row.label} <Text style={{ color: theme.primary, fontWeight: '800' }}>{row.value.toFixed(2)}x</Text>
+                  </Text>
+                ))}
+                {sub.categories.length > 4 ? (
+                  <Text style={[styles.categoryValue, { color: theme.textMuted }]}>+{sub.categories.length - 4} more in details</Text>
+                ) : null}
+              </View>
+            ) : (
+              <Text style={[styles.statValue, { color: theme.text }]}>{sub.overall}</Text>
+            )}
+            <Text style={[styles.statSub, { color: theme.textMuted }]}>
+              {sub.categories.length ? 'By investor category' : sub.emptyLabel}
+            </Text>
           </View>
           <View style={[styles.statCell, { borderLeftWidth: 1, borderLeftColor: theme.border }]}>
-            <Text style={[styles.statLabel, { color: theme.textMuted }]}>Trend</Text>
+            <Text style={[styles.statLabel, { color: theme.textMuted }]}>{phase.key === 'listed' ? 'Status' : 'Trend'}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
               <Ionicons
                 name={trend.dir === 'up' ? 'trending-up' : trend.dir === 'down' ? 'trending-down' : 'remove'}
@@ -121,10 +151,28 @@ export function IPOCard({
               </Text>
             </View>
             <Text style={[styles.statSub, { color: theme.textMuted }]}>
-              {phase.key === 'upcoming' ? 'Pre-market' : '7 sessions'}
+              {phase.key === 'listed'
+                ? 'Post-listing'
+                : phase.key === 'upcoming'
+                  ? 'Pre-market'
+                  : (ipo.gmpHistory?.length ?? 0) > 1
+                    ? `${ipo.gmpHistory?.length} observations`
+                    : 'No history'}
             </Text>
           </View>
         </View>
+        {guruSource ? (
+          <Text
+            accessibilityRole="link"
+            onPress={(event) => {
+              event.stopPropagation();
+              void Linking.openURL(guruSource.url ?? 'https://www.ipoguru.in/').catch(() => undefined);
+            }}
+            style={[styles.attribution, { color: theme.primary }]}
+          >
+            Data by IPO Guru
+          </Text>
+        ) : null}
       </Pressable>
     </Animated.View>
   );
@@ -157,5 +205,7 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   statValue: { fontSize: 14, fontWeight: '800', letterSpacing: -0.2 },
+  categoryValue: { fontSize: 9.5, fontWeight: '700', lineHeight: 13 },
+  attribution: { fontSize: 9, fontWeight: '700', textAlign: 'right', marginTop: 4, textDecorationLine: 'underline' },
   statSub: { fontSize: 10.5, marginTop: 1.5, fontWeight: '600' },
 });
