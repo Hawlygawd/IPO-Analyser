@@ -6,13 +6,13 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { DATA_AS_OF_LABEL } from '../lib/ipoData';
+import { IPOT, DATA_AS_OF_LABEL } from '../lib/ipoData';
 import { IPO } from '../lib/types';
-import { diffDays, formatUpdatedAt, gmpPercent, parseISO, startOfToday } from '../lib/format';
+import { diffDays, gmpPercent, parseISO, startOfToday } from '../lib/format';
 import { phaseOf } from '../lib/analysis';
 import { IPOCard } from '../components/IPOCard';
 import { SegmentedTabs } from '../components/SegmentedTabs';
-import { CardSkeleton, EmptyState } from '../components/ui';
+import { CardSkeleton } from '../components/ui';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { RootStackParamList } from '../navigation/types';
 
@@ -20,7 +20,7 @@ type Tab = 'open' | 'upcoming' | 'closed';
 
 export function HomeScreen({ theme }: { theme: Theme }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { refreshing, refresh, lastRefresh, dataMode, dataWarning, ipos, isWatched, alerts } = useStore();
+  const { refreshing, refresh, lastRefresh, isWatched, alerts } = useStore();
   const [tab, setTab] = useState<Tab>('open');
   const [booted, setBooted] = useState(false);
 
@@ -30,56 +30,47 @@ export function HomeScreen({ theme }: { theme: Theme }) {
   }, []);
 
   const today = startOfToday();
-  const dayKey = today.getTime();
 
   const buckets = useMemo(() => {
     const open: IPO[] = [];
     const upcoming: IPO[] = [];
     const closed: IPO[] = [];
-    for (const ipo of ipos) {
+    for (const ipo of IPOT) {
       const phase = phaseOf(ipo, today);
       if (phase.key === 'open') open.push(ipo);
-      else if (phase.key === 'upcoming') upcoming.push(ipo);
-      else closed.push(ipo);
+      else if (phase.key === 'upcoming') {
+        const inWindow = diffDays(today, parseISO(ipo.openDate)) <= 6;
+        (inWindow ? open : upcoming).push(ipo);
+      } else closed.push(ipo);
     }
     open.sort((a, b) => a.closeDate.localeCompare(b.closeDate));
     upcoming.sort((a, b) => a.openDate.localeCompare(b.openDate));
     closed.sort((a, b) => b.listingDate.localeCompare(a.listingDate));
     return { open, upcoming, closed };
-  }, [ipos, dayKey]);
+  }, [today]);
 
-  const openingSoon = buckets.upcoming.filter((ipo) => {
-    const days = diffDays(today, parseISO(ipo.openDate));
-    return days >= 0 && days <= 6;
-  });
-  const nextUp = buckets.upcoming[0];
-  const strongCount = ipos.filter((ipo) => {
-    const pct = gmpPercent(ipo);
-    const phase = phaseOf(ipo, today).key;
-    return (phase === 'open' || phase === 'upcoming') && pct != null && pct >= 25;
+  const literallyOpen = IPOT.filter((i) => phaseOf(i, today).key === 'open');
+  const nextUp = useMemo(
+    () => [...IPOT].sort((a, b) => a.openDate.localeCompare(b.openDate)).find((i) => phaseOf(i, today).key === 'upcoming'),
+    [today]
+  );
+  const strongCount = IPOT.filter((i) => {
+    const pct = gmpPercent(i);
+    return pct != null && pct >= 25;
   }).length;
 
   const data = tab === 'open' ? buckets.open : tab === 'upcoming' ? buckets.upcoming : buckets.closed;
-  const statusLabel =
-    dataMode === 'live'
-      ? `Live · ${formatUpdatedAt(lastRefresh)}`
-      : dataMode === 'limited'
-        ? `Live · best-effort coverage · ${formatUpdatedAt(lastRefresh)}`
-        : dataMode === 'cached'
-          ? `Cached · ${formatUpdatedAt(lastRefresh)}`
-          : dataMode === 'offline'
-            ? `Offline snapshot · ${DATA_AS_OF_LABEL}`
-            : 'Checking live sources…';
+  const updatedTime = new Date(lastRefresh).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
 
   const SummaryStrip = (
     <View style={styles.summaryRow}>
-      <SummaryBox theme={theme} icon="radio-button-on" tone="up" label="Live now" value={String(buckets.open.length)} />
+      <SummaryBox theme={theme} icon="radio-button-on" tone="up" label="Live now" value={String(literallyOpen.length)} />
       <SummaryBox
         theme={theme}
         icon="time-outline"
         tone="info"
         label="Opening ≤ 6 days"
-        value={String(openingSoon.length)}
+        value={String(buckets.open.length)}
       />
       <SummaryBox theme={theme} icon="trending-up" tone="warn" label="Strong GMP" value={String(strongCount)} />
     </View>
@@ -88,15 +79,7 @@ export function HomeScreen({ theme }: { theme: Theme }) {
   const header = (
     <View style={{ gap: 14, paddingHorizontal: 0 }}>
       {SummaryStrip}
-      {dataMode === 'limited' ? (
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginHorizontal: 16, padding: 10, borderRadius: 11, backgroundColor: theme.warnSoft }}>
-          <Ionicons name="information-circle-outline" size={15} color={theme.warn} style={{ marginTop: 1 }} />
-          <Text style={{ flex: 1, color: theme.textSub, fontSize: 11, lineHeight: 16 }}>
-            Best-effort live coverage may be incomplete. Check Settings or the issue detail's source links for verification.
-          </Text>
-        </View>
-      ) : null}
-      {tab === 'open' && buckets.open.length === 0 && nextUp ? (
+      {tab === 'open' && literallyOpen.length === 0 && nextUp ? (
         <Animated.View entering={FadeIn.duration(260)} style={[styles.banner, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
             <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: theme.warnSoft, alignItems: 'center', justifyContent: 'center' }}>
@@ -134,7 +117,7 @@ export function HomeScreen({ theme }: { theme: Theme }) {
         theme={theme}
         large
         title="IPO Pulse"
-        subtitle={`${statusLabel} \u2022 ${ipos.length} IPOs tracked`}
+        subtitle={`Updated ${updatedTime} \u2022 board as of ${DATA_AS_OF_LABEL}`}
         right={
           <Pressable
             onPress={() => navigation.navigate('Alerts')}
@@ -176,25 +159,21 @@ export function HomeScreen({ theme }: { theme: Theme }) {
             />
           )}
           ListEmptyComponent={
-            <EmptyState
-              theme={theme}
-              icon={tab === 'closed' ? 'checkmark-done-outline' : 'file-tray-outline'}
-              title={tab === 'closed' ? 'No closed IPOs found' : tab === 'open' ? 'No IPOs open right now' : 'No upcoming IPOs found'}
-              message={
-                dataWarning ??
-                (tab === 'closed'
-                  ? 'Recently closed, allotment-stage and listed IPOs will appear here when a source reports them.'
-                  : tab === 'open'
-                    ? 'There are no IPOs accepting bids today. Pull down to check the live sources.'
-                    : 'Upcoming issues will appear here as their dates are announced by a source.')
-              }
-              actionLabel={refreshing ? 'Refreshing…' : 'Refresh board'}
-              onAction={refresh}
-            />
+            <View style={{ alignItems: 'center', paddingVertical: 46, paddingHorizontal: 32 }}>
+              <Ionicons name="file-tray-outline" size={34} color={theme.textMuted} />
+              <Text style={{ color: theme.text, fontWeight: '800', marginTop: 12, fontSize: 15.5 }}>
+                Nothing in this list
+              </Text>
+              <Text style={{ color: theme.textSub, fontSize: 13, textAlign: 'center', marginTop: 5, lineHeight: 19 }}>
+                {tab === 'closed'
+                  ? 'Closed issues with allotment or listing status will appear here.'
+                  : 'Check the other tabs for the full season calendar.'}
+              </Text>
+            </View>
           }
           ListFooterComponent={
             <Text style={[styles.footer, { color: theme.textMuted }]}>
-              NSE/BSE public exchange pages, with optional IPOAlerts and IPO Guru cross-checks; availability and coverage can vary. \u2022 GMP is unofficial and not investment advice.
+              Indicative data from public trackers \u2022 not investment advice.
             </Text>
           }
         />

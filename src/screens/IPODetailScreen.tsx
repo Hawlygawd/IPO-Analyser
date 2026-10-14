@@ -7,7 +7,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { gmpPercent, formatCr, formatDay, formatRupees, lotInvestment, subscriptionCategoryRows } from '../lib/format';
+import { getIpo } from '../lib/ipoData';
+import { gmpPercent, formatCr, formatDay, formatRupees, lotInvestment } from '../lib/format';
 import { computeTrend, gmpSeries, insights, nextMilestone, phaseOf, sentiment } from '../lib/analysis';
 import { Avatar, Button, Chip, Row, SectionCard } from '../components/ui';
 import { GmpBarChart, SubscriptionBars } from '../components/Charts';
@@ -15,15 +16,14 @@ import { MilestoneTimeline } from '../components/Milestone';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { phaseTone } from '../components/IPOCard';
 import { RootStackParamList } from '../navigation/types';
-import { SEBI_PUBLIC_ISSUES_URL } from '../lib/ipoSources';
 
 export function IPODetailScreen({ theme }: { theme: Theme }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'IPODetail'>>();
   const insets = useSafeAreaInsets();
-  const { isWatched, toggleWatch, permission, ipos } = useStore();
+  const { isWatched, toggleWatch, permission } = useStore();
 
-  const ipo = ipos.find((item) => item.id === route.params.id);
+  const ipo = getIpo(route.params.id);
 
   const analysis = useMemo(() => {
     if (!ipo) return null;
@@ -50,9 +50,6 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
   const milestone = nextMilestone(ipo);
   const investment = lotInvestment(ipo);
   const s = ipo.subscription;
-  const guruSource = ipo.sources?.find((source) => source.name.toLowerCase().includes('ipo guru'));
-  const sourceLinks = (ipo.sources ?? []).filter((source) => source.url);
-  const hasSeparatePrimaryLink = !ipo.prospectusUrl && !sourceLinks.some((source) => source.url === ipo.sourceUrl);
 
   const onShare = async () => {
     try {
@@ -98,7 +95,7 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
               </Text>
               <Row style={{ gap: 6, marginTop: 5 }}>
                 <Chip label={phase.label} tone={phaseTone(phase.key)} theme={theme} small />
-                <Chip label={`${milestone.label}${milestone.tentative ? ' (est.)' : ''} ${formatDay(milestone.date)}`} tone="neutral" theme={theme} small />
+                <Chip label={`${milestone.label} ${formatDay(milestone.date)}`} tone="neutral" theme={theme} small />
               </Row>
             </View>
           </Row>
@@ -113,7 +110,7 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
             <HeroStat theme={theme} label="Issue size" value={formatCr(ipo.issueSizeCr)} />
             <HeroStat
               theme={theme}
-              label={phase.key === 'listed' ? 'Last GMP' : 'GMP'}
+              label="GMP"
               value={ipo.gmp != null ? `${ipo.gmp > 0 ? '+' : ''}${formatRupees(ipo.gmp)}` : '\u2014'}
               sub={pct != null ? `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%` : 'band TBA'}
               tone={ipo.gmp == null ? 'neutral' : ipo.gmp > 0 ? 'up' : ipo.gmp < 0 ? 'down' : 'neutral'}
@@ -121,31 +118,11 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
           </View>
         </Animated.View>
 
-        {ipo.sourceConflicts?.length ? (
-          <Animated.View entering={FadeInDown.delay(35).duration(320)}>
-            <SectionCard theme={theme} title="Source disagreement" style={{ marginTop: 14 }}>
-              <Row style={{ alignItems: 'flex-start', gap: 8 }}>
-                <Ionicons name="warning-outline" size={17} color={theme.warn} style={{ marginTop: 1 }} />
-                <Text style={{ flex: 1, fontSize: 12.5, color: theme.textSub, lineHeight: 19 }}>
-                  Connected sources report different issue facts. Verify the latest notice on the primary exchange before acting.
-                </Text>
-              </Row>
-              <View style={{ marginTop: 8, gap: 6 }}>
-                {ipo.sourceConflicts.map((conflict) => (
-                  <Text key={conflict} style={{ fontSize: 12, color: theme.warn, lineHeight: 18 }}>• {conflict}</Text>
-                ))}
-              </View>
-            </SectionCard>
-          </Animated.View>
-        ) : null}
-
         {/* Analysis */}
         <Animated.View entering={FadeInDown.delay(60).duration(320)}>
           <SectionCard theme={theme} title="Analysis" style={{ marginTop: 14 }}>
             <Row style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-              <Text style={{ fontSize: 13, color: theme.textSub, fontWeight: '600' }}>
-                {phase.key === 'listed' ? 'Historical pre-listing mood' : 'Grey market mood'}
-              </Text>
+              <Text style={{ fontSize: 13, color: theme.textSub, fontWeight: '600' }}>Grey market mood</Text>
               <Text
                 style={{
                   fontSize: 13,
@@ -170,17 +147,13 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
 
             <View style={{ marginTop: 18 }}>
               <Text style={{ fontSize: 11, fontWeight: '800', color: theme.textMuted, letterSpacing: 0.6, marginBottom: 10 }}>
-                VERIFIED GMP HISTORY (\u20B9)
+                GMP \u2022 LAST 7 SESSIONS (\u20B9)
               </Text>
-              {analysis.series.length > 1 ? (
-                <GmpBarChart theme={theme} values={analysis.series} />
-              ) : (
-                <Text style={{ fontSize: 12, color: theme.textMuted, lineHeight: 18 }}>
-                  {ipo.gmp == null
-                    ? 'A verified grey-market quote has not been reported by the connected sources.'
-                    : 'Only the latest quote is available. A trend chart is hidden until dated historical observations are supplied.'}
-                </Text>
-              )}
+              <GmpBarChart
+                theme={theme}
+                values={analysis.series}
+                labels={[formatDay(ipo.openDate), 'Today']}
+              />
             </View>
 
             <View style={{ marginTop: 16, gap: 10 }}>
@@ -195,49 +168,34 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
         </Animated.View>
 
         {/* Subscription */}
-        <Animated.View entering={FadeInDown.delay(110).duration(320)}>
-          <SectionCard
-            theme={theme}
-            title="Subscription by category"
-            right={s?.asOf ? <Chip label={s.asOf} tone="info" theme={theme} small /> : undefined}
-            style={{ marginTop: 14 }}
-          >
-            {subscriptionCategoryRows(s).length > 0 ? (
+        {s ? (
+          <Animated.View entering={FadeInDown.delay(110).duration(320)}>
+            <SectionCard
+              theme={theme}
+              title="Subscription"
+              right={<Chip label={s.asOf ?? 'Final'} tone="info" theme={theme} small />}
+              style={{ marginTop: 14 }}
+            >
               <SubscriptionBars
                 theme={theme}
-                rows={subscriptionCategoryRows(s).map((row) => ({
-                  label: row.label,
-                  value: row.value,
-                  display: `${row.value.toFixed(2)}x`,
-                  tone: row.key === 'qib' ? 'info' : row.key === 'employee' || row.key === 'shareholder' ? 'warn' : 'up',
-                }))}
+                rows={[
+                  s.qib != null ? { label: 'QIB', value: s.qib, display: `${s.qib.toFixed(2)}x`, tone: 'info' as const } : null,
+                  s.nii != null ? { label: 'NII / HNI', value: s.nii, display: `${s.nii.toFixed(2)}x`, tone: 'up' as const } : null,
+                  s.retail != null ? { label: 'Retail', value: s.retail, display: `${s.retail.toFixed(2)}x`, tone: 'up' as const } : null,
+                  s.total != null ? { label: 'Overall', value: s.total, display: `${s.total.toFixed(2)}x`, tone: 'warn' as const } : null,
+                ].filter((r): r is NonNullable<typeof r> => r != null)}
               />
-            ) : s?.total != null ? (
-              <View style={{ gap: 6 }}>
-                <Text style={{ fontSize: 12.5, color: theme.textSub, lineHeight: 18 }}>
-                  Category-wise figures have not been supplied by the connected source.
-                </Text>
-                <Text style={{ fontSize: 14, fontWeight: '800', color: theme.text }}>
-                  Overall only: {s.total.toFixed(2)}x
-                </Text>
-                <Text style={{ fontSize: 11.5, color: theme.textMuted, lineHeight: 17 }}>
-                  Category figures appear only when NSE/BSE or a configured IPO Guru Standard-or-higher account supplies them; availability varies by issue and refresh time.
-                </Text>
-              </View>
-            ) : (
+            </SectionCard>
+          </Animated.View>
+        ) : (
+          <Animated.View entering={FadeInDown.delay(110).duration(320)}>
+            <SectionCard theme={theme} title="Subscription" style={{ marginTop: 14 }}>
               <Text style={{ fontSize: 13, color: theme.textSub, lineHeight: 20 }}>
-                No subscription figures have been reported yet. Each category is shown separately once a connected source publishes it.
+                Bidding has not started yet. Category-wise subscription updates appear here from the opening day.
               </Text>
-            )}
-            {guruSource ? (
-              <Pressable onPress={() => Linking.openURL(guruSource.url ?? 'https://www.ipoguru.in/').catch(() => undefined)} hitSlop={8}>
-                <Text style={{ color: theme.primary, fontSize: 11.5, fontWeight: '700', textDecorationLine: 'underline', marginTop: 8 }}>
-                  Data by IPO Guru
-                </Text>
-              </Pressable>
-            ) : null}
-          </SectionCard>
-        </Animated.View>
+            </SectionCard>
+          </Animated.View>
+        )}
 
         {/* Timeline */}
         <Animated.View entering={FadeInDown.delay(160).duration(320)}>
@@ -258,79 +216,21 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
               <Fact label="Sector" value={ipo.sector} theme={theme} />
             </View>
 
-            <View style={{ gap: 8, marginTop: 14 }}>
-              {ipo.prospectusUrl ? (
-                <Pressable
-                  accessibilityRole="link"
-                  onPress={() => Linking.openURL(ipo.prospectusUrl ?? '').catch(() => undefined)}
-                  style={({ pressed }) => [
-                    styles.sourceRow,
-                    { marginTop: 0, backgroundColor: theme.cardAlt, borderColor: theme.border },
-                    pressed && { opacity: 0.75 },
-                  ]}
-                >
-                  <Ionicons name="document-text-outline" size={17} color={theme.primary} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>Issuer prospectus / RHP</Text>
-                    <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 1 }} numberOfLines={1}>{ipo.prospectusUrl}</Text>
-                  </View>
-                  <Ionicons name="open-outline" size={15} color={theme.textMuted} />
-                </Pressable>
-              ) : null}
-              {hasSeparatePrimaryLink ? (
-                <Pressable
-                  accessibilityRole="link"
-                  onPress={() => Linking.openURL(ipo.sourceUrl).catch(() => undefined)}
-                  style={({ pressed }) => [
-                    styles.sourceRow,
-                    { marginTop: 0, backgroundColor: theme.cardAlt, borderColor: theme.border },
-                    pressed && { opacity: 0.75 },
-                  ]}
-                >
-                  <Ionicons name="document-text-outline" size={17} color={theme.primary} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>Primary issue link</Text>
-                    <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 1 }}>Issuer / prospectus / provider record</Text>
-                  </View>
-                  <Ionicons name="open-outline" size={15} color={theme.textMuted} />
-                </Pressable>
-              ) : null}
-              {sourceLinks.map((source) => (
-                <Pressable
-                  key={`${source.name}-${source.url}`}
-                  accessibilityRole="link"
-                  onPress={() => Linking.openURL(source.url ?? ipo.sourceUrl).catch(() => undefined)}
-                  style={({ pressed }) => [
-                    styles.sourceRow,
-                    { marginTop: 0, backgroundColor: theme.cardAlt, borderColor: theme.border },
-                    pressed && { opacity: 0.75 },
-                  ]}
-                >
-                  <Ionicons name="open-outline" size={17} color={theme.primary} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{source.name}</Text>
-                    <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 1 }} numberOfLines={1}>{source.url}</Text>
-                  </View>
-                  <Ionicons name="open-outline" size={15} color={theme.textMuted} />
-                </Pressable>
-              ))}
-              <Pressable
-                accessibilityRole="link"
-                onPress={() => Linking.openURL(SEBI_PUBLIC_ISSUES_URL).catch(() => undefined)}
-                style={({ pressed }) => [
-                  styles.sourceRow,
-                  { marginTop: 0, backgroundColor: theme.cardAlt, borderColor: theme.border },
-                  pressed && { opacity: 0.75 },
-                ]}
-              >
-                <Ionicons name="document-text-outline" size={17} color={theme.primary} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>SEBI public-issue filings</Text>
-                  <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 1 }}>Official offer-document index; not live subscription data</Text>
-                </View>
-                <Ionicons name="open-outline" size={15} color={theme.textMuted} />
-              </Pressable>
-            </View>
+            <Pressable
+              onPress={() => Linking.openURL(ipo.sourceUrl).catch(() => undefined)}
+              style={({ pressed }) => [
+                styles.sourceRow,
+                { backgroundColor: theme.cardAlt, borderColor: theme.border },
+                pressed && { opacity: 0.75 },
+              ]}
+            >
+              <Ionicons name="document-text-outline" size={17} color={theme.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>RHP, dates & live updates</Text>
+                <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 1 }}>via {ipo.sourceName}</Text>
+              </View>
+              <Ionicons name="open-outline" size={15} color={theme.textMuted} />
+            </Pressable>
           </SectionCard>
         </Animated.View>
 

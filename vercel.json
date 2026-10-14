@@ -1,14 +1,9 @@
 {
-  "buildCommand": "npm run build",
+  "buildCommand": null,
   "outputDirectory": "dist",
-  "functions": {
-    "api/ipoFeed.js": {
-      "maxDuration": 30
-    }
-  },
   "rewrites": [
     {
-      "source": "/((?!_expo|assets|api|.*\\..*).*)",
+      "source": "/((?!_expo|assets|.*\\..*).*)",
       "destination": "/index.html"
     }
   ]

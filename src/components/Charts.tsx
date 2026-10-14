@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { radius, Theme } from '../theme';
 
-/** Compact bar chart of source-reported grey-market premium observations. */
+/** Compact bar chart of the last N grey-market sessions (no SVG dependency). */
 export function GmpBarChart({
   values,
   labels,
@@ -14,60 +14,30 @@ export function GmpBarChart({
   theme: Theme;
   height?: number;
 }) {
-  const plotHeight = Math.max(20, height - 24);
-  const maxPositive = Math.max(0, ...values.filter((value) => value > 0));
-  const maxNegative = Math.max(0, ...values.map((value) => Math.abs(Math.min(0, value))));
-  const baseline =
-    maxNegative === 0
-      ? plotHeight
-      : maxPositive === 0
-        ? 0
-        : (plotHeight * maxPositive) / (maxPositive + maxNegative);
-
+  const max = Math.max(1, ...values);
   return (
     <View>
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, height }}>
-        {values.map((value, index) => {
-          const positive = value >= 0;
-          const scale = positive ? maxPositive : maxNegative;
-          const availableHeight = positive ? baseline : plotHeight - baseline;
-          const barHeight = Math.max(3, scale > 0 ? (Math.abs(value) / scale) * availableHeight : 3);
-          const barTop = positive ? Math.max(0, baseline - barHeight) : baseline;
-          const labelTop = positive ? Math.max(0, barTop - 14) : Math.min(plotHeight - 12, baseline + barHeight + 1);
-          const isLast = index === values.length - 1;
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height }}>
+        {values.map((v, i) => {
+          const ratio = Math.max(0.08, v / max);
+          const isLast = i === values.length - 1;
           const barColor = isLast ? theme.primary : theme.mode === 'dark' ? theme.primarySoft : '#BFE9D8';
-
           return (
-            <View key={`${index}-${value}`} style={{ flex: 1, height: plotHeight, position: 'relative', alignItems: 'center' }}>
-              {maxPositive > 0 && maxNegative > 0 ? (
-                <View
-                  style={{
-                    position: 'absolute',
-                    top: baseline,
-                    left: 0,
-                    right: 0,
-                    height: StyleSheet.hairlineWidth,
-                    backgroundColor: theme.border,
-                  }}
-                />
-              ) : null}
+            <View key={`${i}-${v}`} style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end' }}>
               <Text
                 style={{
-                  position: 'absolute',
-                  top: labelTop,
-                  fontSize: 9,
+                  fontSize: 9.5,
                   fontWeight: '700',
                   color: isLast ? theme.primary : theme.textMuted,
+                  marginBottom: 3,
                 }}
               >
-                {value}
+                {v}
               </Text>
               <View
                 style={{
-                  position: 'absolute',
-                  top: barTop,
                   width: '100%',
-                  height: Math.min(availableHeight || 3, barHeight),
+                  height: Math.max(6, ratio * (height - 24)),
                   borderRadius: radius.sm - 3,
                   backgroundColor: barColor,
                 }}
@@ -94,7 +64,7 @@ export interface BarRow {
 }
 
 export function SubscriptionBars({ rows, theme }: { rows: BarRow[]; theme: Theme }) {
-  const max = Math.max(1, ...rows.map((row) => row.value));
+  const max = Math.max(1, ...rows.map((r) => r.value));
   return (
     <View style={{ gap: 12 }}>
       {rows.map((row) => {

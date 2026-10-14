@@ -5,7 +5,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { diffDays, formatDay, formatUpdatedAt, parseISO, startOfToday } from '../lib/format';
+import { DATA_AS_OF_LABEL } from '../lib/ipoData';
+import { diffDays, formatDay, parseISO, startOfToday } from '../lib/format';
 import { nextMilestone } from '../lib/analysis';
 import { IPOCard } from '../components/IPOCard';
 import { EmptyState } from '../components/ui';
@@ -14,7 +15,7 @@ import { RootStackParamList } from '../navigation/types';
 
 export function WatchlistScreen({ theme }: { theme: Theme }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { watchedIpos, isWatched, refresh, refreshing, permission, enableNotifications, lastRefresh, dataMode } = useStore();
+  const { watchedIpos, isWatched, refresh, refreshing, permission, enableNotifications } = useStore();
   const today = startOfToday();
 
   const nextEvent = useMemo(() => {
@@ -35,8 +36,8 @@ export function WatchlistScreen({ theme }: { theme: Theme }) {
         title="Watchlist"
         subtitle={
           watchedIpos.length > 0
-            ? `${watchedIpos.length} IPO${watchedIpos.length === 1 ? '' : 's'} \u2022 ${dataMode === 'live' ? 'Live' : dataMode === 'limited' ? 'Live · best-effort' : dataMode === 'cached' ? 'Cached' : 'Offline'}${lastRefresh ? ` · ${formatUpdatedAt(lastRefresh)}` : ''}`
-            : 'Your starred IPOs stay saved on this device'
+            ? `${watchedIpos.length} IPO${watchedIpos.length === 1 ? '' : 's'} \u2022 board as of ${DATA_AS_OF_LABEL}`
+            : `Board as of ${DATA_AS_OF_LABEL}`
         }
       />
 
@@ -91,7 +92,7 @@ export function WatchlistScreen({ theme }: { theme: Theme }) {
                       {nextEvent.ipo.name} \u2022 {nextEvent.step.label.toLowerCase()}
                     </Text>
                     <Text style={{ fontSize: 11.5, color: theme.textSub, marginTop: 2 }}>
-                      {formatDay(nextEvent.step.date, true)}{nextEvent.step.tentative ? ' · tentative estimate' : ''}
+                      {formatDay(nextEvent.step.date, true)}
                     </Text>
                   </View>
                 </View>

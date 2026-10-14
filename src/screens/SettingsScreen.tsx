@@ -1,11 +1,9 @@
 import React from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Theme, ThemeMode } from '../theme';
 import { useStore } from '../lib/store';
-import { DATA_AS_OF_LABEL } from '../lib/ipoData';
-import { formatUpdatedAt } from '../lib/format';
-import { SEBI_PUBLIC_ISSUES_URL } from '../lib/ipoSources';
+import { DATA_AS_OF_LABEL, IPOT } from '../lib/ipoData';
 import { Button, SectionCard } from '../components/ui';
 import { ScreenHeader } from '../components/ScreenHeader';
 
@@ -23,24 +21,7 @@ const NOTIF_ROWS: { key: 'openDay' | 'lastDay' | 'allotment' | 'listing'; label:
 ];
 
 export function SettingsScreen({ theme }: { theme: Theme }) {
-  const {
-    themeMode,
-    setThemeMode,
-    prefs,
-    setPref,
-    permission,
-    enableNotifications,
-    watchlist,
-    rescheduleAll,
-    refresh,
-    refreshing,
-    lastRefresh,
-    dataMode,
-    dataSources,
-    dataWarning,
-    storageWarning,
-    ipos,
-  } = useStore();
+  const { themeMode, setThemeMode, prefs, setPref, permission, enableNotifications, watchlist, rescheduleAll, refresh } = useStore();
 
   const permLabel =
     permission === 'granted'
@@ -53,7 +34,7 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <ScreenHeader theme={theme} large title="Settings" subtitle={`${watchlist.length} watched \u2022 ${ipos.length} IPOs tracked`} />
+      <ScreenHeader theme={theme} large title="Settings" subtitle={`${watchlist.length} watched \u2022 ${IPOT.length} IPOs tracked`} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <SectionCard theme={theme} title="Appearance">
           <View style={styles.modeRow}>
@@ -113,8 +94,8 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
 
           {permission === 'unsupported' ? (
             <Text style={{ fontSize: 11.5, color: theme.textMuted, marginTop: 10, lineHeight: 17 }}>
-              Local push notifications are supported on the iOS and Android builds. The web preview keeps
-              your watchlist and data sync available, but cannot deliver device push notifications.
+              Local push notifications fire on the iOS and Android builds. On this preview, every scheduled
+              reminder is logged in the Alerts tab instead.
             </Text>
           ) : (
             <Button
@@ -128,72 +109,11 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
           )}
         </SectionCard>
 
-        <SectionCard theme={theme} title="Live IPO data" style={{ marginTop: 14 }}>
-          <RowLine theme={theme} label="Last source check" value={lastRefresh ? formatUpdatedAt(lastRefresh) : 'Not synced yet'} />
-          {!lastRefresh || dataMode === 'offline' ? <RowLine theme={theme} label="Bundled fallback snapshot" value={DATA_AS_OF_LABEL} /> : null}
-          <RowLine
-            theme={theme}
-            label="Feed status"
-            value={
-              dataMode === 'live'
-                ? 'Live · full feed'
-                : dataMode === 'limited'
-                  ? 'Live · best-effort coverage'
-                  : dataMode === 'cached'
-                    ? 'Offline · cached data'
-                    : dataMode === 'loading'
-                      ? 'Connecting…'
-                      : 'Offline snapshot'
-            }
-          />
-          <RowLine theme={theme} label="IPOs in local board" value={String(ipos.length)} />
-
-          <View style={{ gap: 9, marginTop: 10 }}>
-            {dataSources.length ? dataSources.map((source) => {
-              const tone = source.status === 'ok' ? theme.up : source.status === 'limited' ? theme.warn : source.status === 'error' ? theme.down : theme.textMuted;
-              const label = source.status === 'ok' ? 'Connected' : source.status === 'limited' ? 'Limited' : source.status === 'error' ? 'Unavailable' : 'Not configured';
-              return (
-                <View key={source.id} style={{ padding: 10, borderRadius: 11, backgroundColor: theme.cardAlt }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Ionicons name={source.status === 'ok' ? 'checkmark-circle' : source.status === 'error' ? 'close-circle' : 'information-circle'} size={16} color={tone} />
-                    <Text style={{ flex: 1, color: theme.text, fontSize: 12.5, fontWeight: '700' }}>{source.name}{source.plan ? ` · ${source.plan} plan` : ''}</Text>
-                    <Text style={{ color: tone, fontSize: 10.5, fontWeight: '800' }}>{label}</Text>
-                  </View>
-                  <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 4, lineHeight: 16 }}>
-                    {source.recordCount} records{source.updatedAt ? ` · checked ${formatUpdatedAt(source.updatedAt)}` : ''}{source.note ? ` · ${source.note}` : ''}
-                  </Text>
-                </View>
-              );
-            }) : (
-              <Text style={{ color: theme.textMuted, fontSize: 12, lineHeight: 17 }}>
-                Sources are checked automatically when the app opens and whenever you refresh the board.
-              </Text>
-            )}
-          </View>
-
-          {dataWarning ? <Text style={{ color: theme.warn, fontSize: 11.5, lineHeight: 17, marginTop: 9 }}>{dataWarning}</Text> : null}
-          {storageWarning ? <Text style={{ color: theme.down, fontSize: 11.5, lineHeight: 17, marginTop: 8 }}>{storageWarning}</Text> : null}
-          <Button
-            theme={theme}
-            label={refreshing ? 'Refreshing…' : 'Refresh board now'}
-            variant="ghost"
-            icon="refresh"
-            onPress={refresh}
-            style={{ marginTop: 12 }}
-          />
-          <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 10, lineHeight: 16 }}>
-            NSE/BSE public exchange pages are the no-provider-key primary sources for issue dates, price bands and available bid categories. Their website endpoints are best-effort, may change, and category lookups are capped. SEBI is the official offer-document filing source, not a live subscription feed. IPO Ji, IPOAlerts and IPO Guru are private trackers/aggregators; they are secondary checks, not official sources. Paid plans do not guarantee complete coverage. Never put provider keys in the mobile bundle.
-          </Text>
-          <Pressable
-            accessibilityRole="link"
-            onPress={() => Linking.openURL(SEBI_PUBLIC_ISSUES_URL).catch(() => undefined)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}
-          >
-            <Ionicons name="open-outline" size={13} color={theme.primary} />
-            <Text style={{ color: theme.primary, fontSize: 11.5, fontWeight: '700', textDecorationLine: 'underline' }}>
-              SEBI public-issue offer-document filings
-            </Text>
-          </Pressable>
+        <SectionCard theme={theme} title="Data" style={{ marginTop: 14 }}>
+          <RowLine theme={theme} label="Board updated" value={DATA_AS_OF_LABEL} />
+          <RowLine theme={theme} label="IPOs tracked" value={String(IPOT.length)} />
+          <RowLine theme={theme} label="Sources" value="IPO Ji \u2022 IPO Watch \u2022 IPO Central \u2022 ET Now \u2022 NDTV Profit" />
+          <Button theme={theme} label="Refresh board" variant="ghost" icon="refresh" onPress={refresh} style={{ marginTop: 12 }} />
         </SectionCard>
 
         <SectionCard theme={theme} title="About" style={{ marginTop: 14 }}>

@@ -1,37 +1,17 @@
 export type Segment = 'Mainboard' | 'SME';
 
 export type IpoPhase = 'upcoming' | 'open' | 'allotment' | 'listed';
-export type IPOStatus = 'announced' | 'upcoming' | 'open' | 'closed' | 'listed';
 
 export interface SubscriptionSplit {
   qib?: number;
-  /** Non-institutional investor total (NII / HNI). */
   nii?: number;
-  /** Small HNI allocation, when the source provides it separately. */
-  sNii?: number;
-  /** Big HNI allocation, when the source provides it separately. */
-  bNii?: number;
   retail?: number;
-  employee?: number;
-  shareholder?: number;
   total?: number;
   asOf?: string;
 }
 
-export interface IpoSource {
-  name: string;
-  url?: string;
-  /** ISO timestamp supplied by the source, when available. */
-  updatedAt?: string;
-}
-
 export interface IPO {
-  /** Stable, local ID; does not change when a provider's record ID changes. */
   id: string;
-  /** Issuer offer document/RHP when a source supplies a direct link. */
-  prospectusUrl?: string;
-  /** Provider ticker/symbol, if available. */
-  symbol?: string;
   name: string;
   sector: string;
   segment: Segment;
@@ -42,40 +22,18 @@ export interface IPO {
   listingDate: string;
   /** dates that are provisional / not yet confirmed by the exchange */
   tentativeDates: string[];
-  /** Last lifecycle status reported by a live source. */
-  currentStatus?: IPOStatus;
   priceBandLow?: number;
   priceBandHigh?: number;
   lotSize?: number;
   issueSizeCr?: number;
   issueType?: string;
   exchanges: string[];
-  /** Grey market premium in ₹ over the upper price band. */
+  /** grey market premium in ₹ over the upper price band */
   gmp?: number;
-  /** Only verified source observations; never generated or interpolated. */
-  gmpHistory?: number[];
   subscription?: SubscriptionSplit;
   about: string;
-  /** Backward-compatible display fields for older saved IPO records. */
   sourceName: string;
   sourceUrl: string;
-  /** Providers contributing data for this IPO. */
-  sources?: IpoSource[];
-  /** Fields that disagree across connected sources and should be verified. */
-  sourceConflicts?: string[];
-  /** ISO timestamp for the latest field update received from a provider. */
-  sourceUpdatedAt?: string;
-}
-
-export interface DataSourceStatus {
-  id: string;
-  name: string;
-  status: 'ok' | 'limited' | 'unconfigured' | 'error';
-  recordCount: number;
-  plan?: string;
-  note?: string;
-  updatedAt?: string;
-  url?: string;
 }
 
 export interface AlertLogItem {
