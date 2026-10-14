@@ -8,11 +8,12 @@ import React, {
   useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useColorScheme } from 'react-native';
-import { AlertLogItem, NotifPrefs, IPO } from './types';
+import { AppState, useColorScheme } from 'react-native';
+import { AlertLogItem, DataSourceStatus, IPO, NotifPrefs } from './types';
 import { ThemeMode } from '../theme';
 import { darkTheme, lightTheme, Theme } from '../theme';
-import { getIpo, IPOT } from './ipoData';
+import { BUNDLED_IPOS } from './ipoData';
+import { fetchLiveIpoFeed, mergeIpoCatalog } from './ipoSources';
 import {
   cancelIds,
   getPermissionState,
@@ -27,14 +28,25 @@ const KEY_ALERTS = '@ipo_pulse/alerts';
 const KEY_THEME = '@ipo_pulse/theme';
 const KEY_IDS = '@ipo_pulse/notif_ids';
 const KEY_REFRESH = '@ipo_pulse/last_refresh';
+const KEY_LAST_ATTEMPT = '@ipo_pulse/last_attempt';
+const KEY_IPOS = '@ipo_pulse/ipo_cache';
+const KEY_LIVE_IPOS = '@ipo_pulse/live_ipo_cache';
+const KEY_SOURCES = '@ipo_pulse/data_sources';
+const KEY_COMPLETE = '@ipo_pulse/catalog_complete';
 
 export type PermissionState = 'granted' | 'denied' | 'undetermined' | 'unsupported';
+export type DataMode = 'loading' | 'live' | 'limited' | 'cached' | 'offline';
 
 interface StoreValue {
   ready: boolean;
   loading: boolean;
   refreshing: boolean;
   lastRefresh: number;
+  dataMode: DataMode;
+  dataSources: DataSourceStatus[];
+  dataWarning: string | null;
+  storageWarning: string | null;
+  ipos: IPO[];
   theme: Theme;
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
@@ -66,184 +78,447 @@ function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function parseStored<T>(value: string | null | undefined, fallback: T): T {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function uniqueStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item): item is string => typeof item === 'string' && item.length > 0))];
+}
+
+function isStoredIpo(value: unknown): value is IPO {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.id === 'string' &&
+    typeof item.name === 'string' &&
+    typeof item.openDate === 'string' &&
+    typeof item.closeDate === 'string' &&
+    typeof item.allotmentDate === 'string' &&
+    typeof item.listingDate === 'string' &&
+    Array.isArray(item.tentativeDates) &&
+    Array.isArray(item.exchanges)
+  );
+}
+
+function isStoredSource(value: unknown): value is DataSourceStatus {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.id === 'string' && typeof item.name === 'string' &&
+    ['ok', 'limited', 'unconfigured', 'error'].includes(String(item.status)) &&
+    typeof item.recordCount === 'number';
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme();
   const [ready, setReady] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState<number>(Date.now());
+  const [lastRefresh, setLastRefresh] = useState(0);
+  const [dataMode, setDataMode] = useState<DataMode>('loading');
+  const [dataSources, setDataSources] = useState<DataSourceStatus[]>([]);
+  const [dataWarning, setDataWarning] = useState<string | null>(null);
+  const [storageWarning, setStorageWarning] = useState<string | null>(null);
+  const [ipos, setIpos] = useState<IPO[]>(BUNDLED_IPOS);
   const [themeMode, setThemeModeState] = useState<ThemeMode>('system');
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [prefs, setPrefs] = useState<NotifPrefs>(DEFAULT_PREFS);
   const [alerts, setAlerts] = useState<AlertLogItem[]>([]);
   const [permission, setPermission] = useState<PermissionState>('undetermined');
-  const notifIds = useRef<Record<string, string[]>>({});
 
-  // ---- boot ---------------------------------------------------------------
+  // Refs keep async actions from closing over stale state during quick taps or
+  // while a network refresh is in flight.
+  const iposRef = useRef<IPO[]>(BUNDLED_IPOS);
+  const liveIposRef = useRef<IPO[]>([]);
+  const watchlistRef = useRef<string[]>([]);
+  const alertsRef = useRef<AlertLogItem[]>([]);
+  const prefsRef = useRef<NotifPrefs>(DEFAULT_PREFS);
+  const notifIds = useRef<Record<string, string[]>>({});
+  const lastAttemptRef = useRef(0);
+  const refreshLock = useRef(false);
+  const watchQueue = useRef<Promise<void>>(Promise.resolve());
+
+  const persistValues = useCallback(async (values: Record<string, unknown>): Promise<boolean> => {
+    try {
+      const encoded = Object.fromEntries(
+        Object.entries(values).map(([key, value]) => [key, JSON.stringify(value)])
+      );
+      await AsyncStorage.setMany(encoded);
+      setStorageWarning(null);
+      return true;
+    } catch {
+      setStorageWarning('Could not save local data. Check device storage and try again.');
+      return false;
+    }
+  }, []);
+
+  const persistValue = useCallback(
+    async (key: string, value: unknown) => persistValues({ [key]: value }),
+    [persistValues]
+  );
+
+  // ---- boot / rehydrate ---------------------------------------------------
   useEffect(() => {
-    (async () => {
+    let active = true;
+    const boot = async () => {
+      let map: Record<string, string | null> = {};
       try {
-        const map = await AsyncStorage.getMany([
+        map = await AsyncStorage.getMany([
           KEY_WATCH,
           KEY_PREFS,
           KEY_ALERTS,
           KEY_THEME,
           KEY_IDS,
           KEY_REFRESH,
+          KEY_LAST_ATTEMPT,
+          KEY_IPOS,
+          KEY_LIVE_IPOS,
+          KEY_SOURCES,
+          KEY_COMPLETE,
         ]);
-        if (map[KEY_WATCH]) setWatchlist(JSON.parse(map[KEY_WATCH] as string));
-        if (map[KEY_PREFS]) setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(map[KEY_PREFS] as string) });
-        if (map[KEY_ALERTS]) setAlerts(JSON.parse(map[KEY_ALERTS] as string));
-        if (map[KEY_THEME]) setThemeModeState(JSON.parse(map[KEY_THEME] as string));
-        if (map[KEY_IDS]) notifIds.current = JSON.parse(map[KEY_IDS] as string);
-        if (map[KEY_REFRESH]) setLastRefresh(Number(map[KEY_REFRESH]) || Date.now());
       } catch {
-        // start fresh on any storage error
+        // A storage failure should not prevent the app from opening. The seed
+        // snapshot remains available and all future writes report an error.
       }
-      const state = await getPermissionState();
-      setPermission(notificationsSupported() ? state : 'unsupported');
-      setReady(true);
-    })();
+
+      const storedIpos = parseStored<unknown>(map[KEY_IPOS], []);
+      const storedLiveIpos = parseStored<unknown>(map[KEY_LIVE_IPOS], []);
+      const cachedIpos = Array.isArray(storedIpos) ? storedIpos.filter(isStoredIpo) : [];
+      const cachedLiveIpos = Array.isArray(storedLiveIpos) ? storedLiveIpos.filter(isStoredIpo) : [];
+      const savedWatchlist = uniqueStringArray(parseStored<unknown>(map[KEY_WATCH], []));
+      const storedSources = parseStored<unknown>(map[KEY_SOURCES], []);
+      const savedSources = Array.isArray(storedSources) ? storedSources.filter(isStoredSource) : [];
+      const savedCatalogComplete = parseStored<boolean>(map[KEY_COMPLETE], false);
+      const seedIds = new Set(BUNDLED_IPOS.map((ipo) => ipo.id));
+      const migratedLiveIpos = cachedIpos.filter(
+        (ipo) => !seedIds.has(ipo.id) || Boolean(ipo.sources?.length || ipo.sourceUpdatedAt)
+      );
+      const liveCache = Array.isArray(cachedLiveIpos) && cachedLiveIpos.length ? cachedLiveIpos : migratedLiveIpos;
+      const hadLiveFeed = liveCache.length > 0 || savedCatalogComplete;
+      const seed = hadLiveFeed ? BUNDLED_IPOS.filter((ipo) => savedWatchlist.includes(ipo.id)) : BUNDLED_IPOS;
+      const initialIpos = mergeIpoCatalog(seed, liveCache);
+      const savedPrefs = {
+        ...DEFAULT_PREFS,
+        ...parseStored<Partial<NotifPrefs>>(map[KEY_PREFS], {}),
+      };
+      const savedAlerts = parseStored<AlertLogItem[]>(map[KEY_ALERTS], []);
+      const savedTheme = parseStored<ThemeMode>(map[KEY_THEME], 'system');
+      const savedNotifIds = parseStored<Record<string, string[]>>(map[KEY_IDS], {});
+      const savedLastRefresh = Number(map[KEY_REFRESH]) || 0;
+      const savedLastAttempt = Number(map[KEY_LAST_ATTEMPT]) || savedLastRefresh;
+
+      if (active) {
+        iposRef.current = initialIpos;
+        liveIposRef.current = liveCache;
+        watchlistRef.current = savedWatchlist;
+        alertsRef.current = Array.isArray(savedAlerts) ? savedAlerts : [];
+        prefsRef.current = savedPrefs;
+        notifIds.current = savedNotifIds && typeof savedNotifIds === 'object' ? savedNotifIds : {};
+        lastAttemptRef.current = savedLastAttempt;
+        setIpos(initialIpos);
+        setWatchlist(savedWatchlist);
+        setPrefs(savedPrefs);
+        setAlerts(alertsRef.current);
+        setThemeModeState(savedTheme);
+        setLastRefresh(savedLastRefresh);
+        setDataSources(Array.isArray(savedSources) ? savedSources : []);
+        setDataMode(liveCache.length > 0 ? 'cached' : 'offline');
+      }
+
+      const currentPermission = await getPermissionState();
+      if (active) {
+        setPermission(notificationsSupported() ? currentPermission : 'unsupported');
+        setReady(true);
+      }
+    };
+
+    void boot();
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const persist = useCallback(async (key: string, value: unknown) => {
+  // ---- live IPO data ------------------------------------------------------
+  const refresh = useCallback(async () => {
+    if (refreshLock.current) return;
+    refreshLock.current = true;
+    const attemptedAt = Date.now();
+    lastAttemptRef.current = attemptedAt;
+    void persistValues({ [KEY_LAST_ATTEMPT]: attemptedAt });
+    setRefreshing(true);
+    setDataWarning(null);
+
     try {
-      await AsyncStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      // ignore write failures
+      const feed = await fetchLiveIpoFeed();
+      if (feed.sources.length > 0) setDataSources(feed.sources);
+      setDataWarning(feed.warnings.length ? feed.warnings.slice(0, 3).join(' ') : null);
+
+      if (feed.ipos.length > 0 || feed.completeness === 'complete') {
+        const isComplete = feed.completeness === 'complete';
+        const watchedIds = new Set(watchlistRef.current);
+        const preservedLive = isComplete
+          ? liveIposRef.current.filter((ipo) => watchedIds.has(ipo.id))
+          : liveIposRef.current;
+        const nextLive = mergeIpoCatalog(preservedLive, feed.ipos);
+        const savedWatched = iposRef.current.filter((ipo) => watchedIds.has(ipo.id));
+        const next = mergeIpoCatalog(savedWatched, nextLive);
+        liveIposRef.current = nextLive;
+        iposRef.current = next;
+        await persistValues({
+          [KEY_IPOS]: next,
+          [KEY_LIVE_IPOS]: nextLive,
+          ...(isComplete ? { [KEY_COMPLETE]: true } : {}),
+        });
+        setIpos(next);
+      }
+
+      if (feed.isFresh) {
+        const timestamp = new Date(feed.fetchedAt).getTime() || Date.now();
+        setLastRefresh(timestamp);
+        const hasUnrestrictedSource = feed.sources.some((source) => source.status === 'ok');
+        const mode: DataMode = feed.completeness === 'complete' && hasUnrestrictedSource
+          ? 'live'
+          : feed.ipos.length > 0
+            ? 'limited'
+            : liveIposRef.current.length > 0
+              ? 'cached'
+              : 'offline';
+        setDataMode(mode);
+        await persistValues({
+          [KEY_REFRESH]: timestamp,
+          [KEY_SOURCES]: feed.sources,
+        });
+      } else {
+        setDataMode(liveIposRef.current.length > 0 ? 'cached' : 'offline');
+        if (feed.sources.length > 0) await persistValue(KEY_SOURCES, feed.sources);
+      }
+    } catch (error) {
+      setDataWarning(error instanceof Error ? error.message : 'Could not refresh IPO data.');
+      setDataMode(liveIposRef.current.length > 0 ? 'cached' : 'offline');
+      setDataSources((current) =>
+        current.length
+          ? current.map((source) =>
+              source.status === 'unconfigured'
+                ? source
+                : {
+                    ...source,
+                    status: 'error',
+                    note: error instanceof Error ? `Last check failed: ${error.message}` : 'Last live check failed.',
+                  }
+            )
+          : [
+              {
+                id: 'network',
+                name: 'Live IPO feed',
+                status: 'error',
+                recordCount: 0,
+                note: error instanceof Error ? error.message : 'Could not reach live sources.',
+              },
+            ]
+      );
+    } finally {
+      setRefreshing(false);
+      refreshLock.current = false;
     }
-  }, []);
+  }, [persistValue, persistValues]);
 
-  const logAlert = useCallback(
-    (item: Omit<AlertLogItem, 'id' | 'at'>) => {
-      setAlerts((prev) => {
-        const next = [{ ...item, id: uid(), at: Date.now() }, ...prev].slice(0, 60);
-        persist(KEY_ALERTS, next);
-        return next;
-      });
-    },
-    [persist]
-  );
+  useEffect(() => {
+    if (!ready) return undefined;
 
+    const refreshIfDue = () => {
+      if (AppState.currentState !== 'background' && Date.now() - lastAttemptRef.current > 5 * 60 * 1000) {
+        void refresh();
+      }
+    };
+    refreshIfDue();
+    const timer = setInterval(refreshIfDue, 30 * 60 * 1000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshIfDue();
+    });
+
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [ready, refresh]);
+
+  // ---- notification scheduling ------------------------------------------
   const scheduleIpo = useCallback(
-    async (ipo: IPO) => {
+    async (ipo: IPO, selectedPrefs = prefsRef.current) => {
       await cancelIds(notifIds.current[ipo.id] ?? []);
-      const ids = await scheduleForIpo(ipo, prefs);
+      const ids = await scheduleForIpo(ipo, selectedPrefs);
       notifIds.current = { ...notifIds.current, [ipo.id]: ids };
-      persist(KEY_IDS, notifIds.current);
+      await persistValue(KEY_IDS, notifIds.current);
       return ids.length;
     },
-    [prefs, persist]
+    [persistValue]
   );
 
-  const toggleWatch = useCallback(
-    async (ipo: IPO) => {
-      const isOn = watchlist.includes(ipo.id);
-      if (isOn) {
-        await cancelIds(notifIds.current[ipo.id] ?? []);
-        const rest = { ...notifIds.current };
-        delete rest[ipo.id];
-        notifIds.current = rest;
-        persist(KEY_IDS, rest);
-        const next = watchlist.filter((id) => id !== ipo.id);
-        setWatchlist(next);
-        persist(KEY_WATCH, next);
-        logAlert({
-          ipoId: ipo.id,
-          ipoName: ipo.name,
-          kind: 'unwatch',
-          title: `${ipo.name} removed`,
-          body: 'Reminders for this IPO have been switched off.',
-        });
-        return false;
-      }
-      const next = [ipo.id, ...watchlist];
-      setWatchlist(next);
-      persist(KEY_WATCH, next);
-      const count = await scheduleIpo(ipo);
-      logAlert({
-        ipoId: ipo.id,
-        ipoName: ipo.name,
-        kind: 'watch',
-        title: `${ipo.name} added to watchlist`,
-        body:
-          count > 0
-            ? `${count} reminder${count === 1 ? '' : 's'} scheduled \u2013 open day, allotment and listing.`
-            : notificationsSupported()
-              ? 'Turn on notifications in Settings to receive reminders.'
-              : 'Reminders are available on the mobile app.',
-      });
-      return true;
+  const logAlert = useCallback(
+    async (item: Omit<AlertLogItem, 'id' | 'at'>) => {
+      const next = [{ ...item, id: uid(), at: Date.now() }, ...alertsRef.current].slice(0, 60);
+      alertsRef.current = next;
+      setAlerts(next);
+      await persistValue(KEY_ALERTS, next);
     },
-    [watchlist, persist, logAlert, scheduleIpo]
+    [persistValue]
   );
+
+  const rescheduleFor = useCallback(
+    async (selectedPrefs: NotifPrefs) => {
+      const all: Record<string, string[]> = {};
+      for (const id of watchlistRef.current) {
+        const ipo = iposRef.current.find((item) => item.id === id);
+        if (!ipo) continue;
+        await cancelIds(notifIds.current[id] ?? []);
+        all[id] = await scheduleForIpo(ipo, selectedPrefs);
+      }
+      notifIds.current = all;
+      await persistValue(KEY_IDS, all);
+    },
+    [persistValue]
+  );
+
+  const lastStartupSchedule = useRef<number | null>(null);
+  useEffect(() => {
+    if (!ready || permission !== 'granted') return;
+    const marker = lastRefresh || -1;
+    if (lastStartupSchedule.current === marker) return;
+    lastStartupSchedule.current = marker;
+    // Reconcile persisted notification IDs after each successful data sync so
+    // changed IPO dates update reminders without creating duplicate alerts.
+    void rescheduleFor(prefsRef.current);
+  }, [ready, permission, lastRefresh, rescheduleFor]);
 
   const rescheduleAll = useCallback(async () => {
-    const all: Record<string, string[]> = {};
-    for (const id of watchlist) {
-      const ipo = getIpo(id);
-      if (!ipo) continue;
-      all[id] = await scheduleForIpo(ipo, prefs);
-    }
-    notifIds.current = all;
-    persist(KEY_IDS, all);
-    logAlert({
+    await rescheduleFor(prefsRef.current);
+    await logAlert({
       ipoId: '-',
       ipoName: 'Reminders',
       kind: 'system',
       title: 'Reminders refreshed',
-      body: `${watchlist.length} watched IPO${watchlist.length === 1 ? '' : 's'} re-synced with your schedule.`,
+      body: `${watchlistRef.current.length} watched IPO${watchlistRef.current.length === 1 ? '' : 's'} re-synced with your schedule.`,
     });
-  }, [watchlist, prefs, persist, logAlert]);
+  }, [logAlert, rescheduleFor]);
+
+  const toggleWatch = useCallback(
+    (ipo: IPO): Promise<boolean> => {
+      const operation = watchQueue.current.then(async () => {
+        const current = watchlistRef.current;
+        const isOn = current.includes(ipo.id);
+        const next = isOn ? current.filter((id) => id !== ipo.id) : [ipo.id, ...current];
+
+        // Persist the watchlist before doing slower notification work. This is
+        // what prevents an app being closed immediately after tapping ⭐ from
+        // losing the saved item on the next launch.
+        watchlistRef.current = next;
+        setWatchlist(next);
+        const didPersist = await persistValues({
+          [KEY_WATCH]: next,
+          [KEY_IPOS]: iposRef.current,
+          [KEY_LIVE_IPOS]: liveIposRef.current,
+        });
+        if (!didPersist) {
+          watchlistRef.current = current;
+          setWatchlist(current);
+          return isOn;
+        }
+
+        if (isOn) {
+          await cancelIds(notifIds.current[ipo.id] ?? []);
+          const ids = { ...notifIds.current };
+          delete ids[ipo.id];
+          notifIds.current = ids;
+          await persistValue(KEY_IDS, ids);
+          await logAlert({
+            ipoId: ipo.id,
+            ipoName: ipo.name,
+            kind: 'unwatch',
+            title: `${ipo.name} removed`,
+            body: 'Reminders for this IPO have been switched off.',
+          });
+          return false;
+        }
+
+        let count = 0;
+        try {
+          count = await scheduleIpo(ipo);
+        } catch {
+          // Keep the watchlist even if a device cannot schedule notifications.
+        }
+        await logAlert({
+          ipoId: ipo.id,
+          ipoName: ipo.name,
+          kind: 'watch',
+          title: `${ipo.name} added to watchlist`,
+          body:
+            count > 0
+              ? `${count} reminder${count === 1 ? '' : 's'} scheduled for the IPO's key dates.`
+              : notificationsSupported()
+                ? 'The IPO is saved. Enable notifications in Settings to receive reminders.'
+                : 'The IPO is saved. Local push reminders are available in the iOS and Android app.',
+        });
+        return true;
+      });
+      watchQueue.current = operation.then(
+        () => undefined,
+        () => undefined
+      );
+      return operation;
+    },
+    [logAlert, persistValue, persistValues, scheduleIpo]
+  );
 
   const setPref = useCallback(
     async (key: keyof NotifPrefs, value: boolean) => {
-      const next = { ...prefs, [key]: value };
+      const next = { ...prefsRef.current, [key]: value };
+      prefsRef.current = next;
       setPrefs(next);
-      persist(KEY_PREFS, next);
+      await persistValue(KEY_PREFS, next);
+      if (permission === 'granted') await rescheduleFor(next);
     },
-    [prefs, persist]
+    [permission, persistValue, rescheduleFor]
   );
 
   const enableNotifications = useCallback(async () => {
     const granted = await requestPermission();
     setPermission(granted ? 'granted' : 'denied');
-    if (granted) {
-      await rescheduleAll();
-    }
+    if (granted) await rescheduleFor(prefsRef.current);
     return granted;
-  }, [rescheduleAll]);
+  }, [rescheduleFor]);
 
+  // ---- appearance and alerts --------------------------------------------
   const setThemeMode = useCallback(
     (mode: ThemeMode) => {
       setThemeModeState(mode);
-      persist(KEY_THEME, mode);
+      void persistValue(KEY_THEME, mode);
     },
-    [persist]
+    [persistValue]
   );
 
   const clearAlerts = useCallback(async () => {
+    alertsRef.current = [];
     setAlerts([]);
-    persist(KEY_ALERTS, []);
-  }, [persist]);
-
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    await new Promise((resolve) => setTimeout(resolve, 900));
-    const at = Date.now();
-    setLastRefresh(at);
-    persist(KEY_REFRESH, at);
-    setRefreshing(false);
-  }, [persist]);
+    await persistValue(KEY_ALERTS, []);
+  }, [persistValue]);
 
   const theme = useMemo(() => {
-    const resolved = themeMode === 'system' ? (systemScheme ?? 'light') : themeMode;
+    const resolved = themeMode === 'system' ? systemScheme ?? 'light' : themeMode;
     return resolved === 'dark' ? darkTheme : lightTheme;
   }, [themeMode, systemScheme]);
 
   const watchedIpos = useMemo(
-    () => watchlist.map((id) => getIpo(id)).filter((x): x is IPO => Boolean(x)),
-    [watchlist]
+    () => watchlist.map((id) => ipos.find((ipo) => ipo.id === id)).filter((ipo): ipo is IPO => Boolean(ipo)),
+    [watchlist, ipos]
   );
+
+  const isWatched = useCallback((id: string) => watchlist.includes(id), [watchlist]);
+  const watchedCountFor = useCallback((id: string) => (watchlist.includes(id) ? 1 : 0), [watchlist]);
 
   const value = useMemo<StoreValue>(
     () => ({
@@ -251,12 +526,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       loading: refreshing,
       refreshing,
       lastRefresh,
+      dataMode,
+      dataSources,
+      dataWarning,
+      storageWarning,
+      ipos,
       theme,
       themeMode,
       setThemeMode,
       watchlist,
       watchedIpos,
-      isWatched: (id: string) => watchlist.includes(id),
+      isWatched,
       toggleWatch,
       prefs,
       setPref,
@@ -266,17 +546,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       alerts,
       clearAlerts,
       refresh,
-      watchedCountFor: (id: string) => (watchlist.includes(id) ? 1 : 0),
+      watchedCountFor,
     }),
     [
       ready,
       refreshing,
       lastRefresh,
+      dataMode,
+      dataSources,
+      dataWarning,
+      storageWarning,
+      ipos,
       theme,
       themeMode,
       setThemeMode,
       watchlist,
       watchedIpos,
+      isWatched,
       toggleWatch,
       prefs,
       setPref,
@@ -286,6 +572,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       alerts,
       clearAlerts,
       refresh,
+      watchedCountFor,
     ]
   );
 
@@ -293,9 +580,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useStore(): StoreValue {
-  const ctx = useContext(StoreContext);
-  if (!ctx) throw new Error('useStore must be used inside StoreProvider');
-  return ctx;
+  const context = useContext(StoreContext);
+  if (!context) throw new Error('useStore must be used inside StoreProvider');
+  return context;
 }
-
-export const TOTAL_IPO_COUNT = IPOT.length;

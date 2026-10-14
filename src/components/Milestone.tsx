@@ -14,6 +14,7 @@ interface Step {
 
 export function MilestoneTimeline({ ipo, theme }: { ipo: IPO; theme: Theme }) {
   const today = startOfToday();
+  const exchanges = ipo.exchanges.filter((exchange) => exchange !== 'Not reported').join(' & ');
   const steps: Step[] = [
     { key: 'open', label: 'Opens for bidding', date: ipo.openDate, tentative: ipo.tentativeDates.includes('open') },
     { key: 'close', label: 'Closes', date: ipo.closeDate, tentative: ipo.tentativeDates.includes('close') },
@@ -25,7 +26,7 @@ export function MilestoneTimeline({ ipo, theme }: { ipo: IPO; theme: Theme }) {
     },
     {
       key: 'listing',
-      label: `Lists on ${ipo.exchanges.join(' & ')}`,
+      label: exchanges ? `Lists on ${exchanges}` : 'Lists on the exchange',
       date: ipo.listingDate,
       tentative: ipo.tentativeDates.includes('listing'),
     },

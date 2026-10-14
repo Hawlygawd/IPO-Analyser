@@ -9,34 +9,11 @@ export interface TrendInfo {
   detail: string;
 }
 
-function hashSeed(input: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < input.length; i += 1) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-/** Deterministic 7-session grey market premium trail ending at the current GMP. */
+/** Returns only verified source observations; never invents a GMP history. */
 export function gmpSeries(ipo: IPO, points = 7): number[] {
-  const current = ipo.gmp ?? 0;
-  if (points <= 1) return [current];
-  let seed = hashSeed(ipo.id);
-  const rand = () => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    return seed / 4294967296;
-  };
-  const dir = current >= 0 ? 1 : -1;
-  const amplitude = Math.max(Math.abs(current) * 0.22, 4);
-  const out: number[] = new Array(points);
-  out[points - 1] = current;
-  for (let i = points - 2; i >= 0; i -= 1) {
-    const drift = dir * (points - 1 - i) * (amplitude * 0.32);
-    const noise = (rand() - 0.5) * amplitude;
-    out[i] = Math.max(0, Math.round(current - drift + noise));
-  }
-  return out;
+  const history = ipo.gmpHistory?.filter((value) => Number.isFinite(value));
+  if (history?.length) return history.slice(-Math.max(1, points));
+  return ipo.gmp == null ? [] : [ipo.gmp];
 }
 
 export function computeTrend(ipo: IPO): TrendInfo {
@@ -48,6 +25,9 @@ export function computeTrend(ipo: IPO): TrendInfo {
 
   if (ipo.gmp == null) {
     return { dir: 'flat', label: 'Awaiting data', detail: 'Grey market quote not tracked yet' };
+  }
+  if (series.length < 2) {
+    return { dir: 'flat', label: 'Latest quote', detail: 'Verified historical GMP observations are not available' };
   }
   if (pct != null && pct >= 25 && delta >= 0) {
     return { dir: 'up', label: 'Strong', detail: 'Premium expanding in the grey market' };
@@ -106,7 +86,9 @@ export function insights(ipo: IPO): string[] {
   const opensIn = diffDays(today, parseISO(ipo.openDate));
 
   if (ipo.gmp != null && pct != null) {
-    if (pct >= 25) {
+    if (phaseOf(ipo).key === 'listed') {
+      out.push(`Last recorded pre-listing GMP was ${ipo.gmp > 0 ? '+' : ''}${formatRupees(ipo.gmp)} (${pct.toFixed(1)}%); this is not a current market price.`);
+    } else if (pct >= 25) {
       out.push(`Grey market premium of +${Math.round(pct)}% over the upper band - strong listing expectation.`);
     } else if (pct >= 8) {
       out.push(`Steady premium of +${Math.round(pct)}% in the grey market.`);
@@ -159,23 +141,31 @@ export function phaseOf(ipo: IPO, today = startOfToday()): Phase {
   const close = parseISO(ipo.closeDate);
   const allot = parseISO(ipo.allotmentDate);
   const listing = parseISO(ipo.listingDate);
-  if (today >= listing) return { key: 'listed', label: 'Listed' };
-  if (today >= allot) return { key: 'allotment', label: 'Allotment' };
-  if (today > close) return { key: 'allotment', label: 'Allotment due' };
-  if (today >= open) return { key: 'open', label: 'Open now' };
+  const allotmentIsConfirmed = !ipo.tentativeDates.includes('allotment');
+  const listingIsConfirmed = !ipo.tentativeDates.includes('listing');
+  const allotmentReached = allotmentIsConfirmed && today >= allot;
+
+  // Never let an estimated fallback date masquerade as a confirmed lifecycle event.
+  if (ipo.currentStatus === 'listed' || (listingIsConfirmed && today >= listing)) {
+    return { key: 'listed', label: 'Listed' };
+  }
+  if (today > close || allotmentReached || ipo.currentStatus === 'closed') {
+    return { key: 'allotment', label: allotmentReached ? 'Allotment' : 'Allotment due' };
+  }
+  if (today >= open || ipo.currentStatus === 'open') return { key: 'open', label: 'Open now' };
   return { key: 'upcoming', label: 'Upcoming' };
 }
 
-export function nextMilestone(ipo: IPO): { label: string; date: string } {
+export function nextMilestone(ipo: IPO): { label: string; date: string; tentative: boolean } {
   const today = startOfToday();
-  const steps: { label: string; date: string }[] = [
-    { label: 'Opens', date: ipo.openDate },
-    { label: 'Closes', date: ipo.closeDate },
-    { label: 'Allotment', date: ipo.allotmentDate },
-    { label: 'Listing', date: ipo.listingDate },
+  const steps: { label: string; date: string; tentative: boolean }[] = [
+    { label: 'Opens', date: ipo.openDate, tentative: ipo.tentativeDates.includes('open') },
+    { label: 'Closes', date: ipo.closeDate, tentative: ipo.tentativeDates.includes('close') },
+    { label: 'Allotment', date: ipo.allotmentDate, tentative: ipo.tentativeDates.includes('allotment') },
+    { label: 'Listing', date: ipo.listingDate, tentative: ipo.tentativeDates.includes('listing') },
   ];
-  for (const s of steps) {
-    if (diffDays(today, parseISO(s.date)) >= 0) return s;
+  for (const step of steps) {
+    if (diffDays(today, parseISO(step.date)) >= 0) return step;
   }
   return steps[steps.length - 1];
 }

@@ -92,12 +92,13 @@ export function planForIpo(ipo: IPO, prefs: NotifPrefs): ScheduledPlan[] {
   const today = startOfToday();
 
   if (prefs.openDay) {
+    const openTentative = ipo.tentativeDates.includes('open');
     const openAt = atHour(ipo.openDate, 8, 45);
     if (isFuture(openAt)) {
       plans.push({
         id: `${ipo.id}-open`,
-        title: `${ipo.name} opens today`,
-        body: `Bidding starts now \u2022 price band ${
+        title: `${ipo.name} opens ${openTentative ? 'tentatively ' : ''}today`,
+        body: `${openTentative ? 'Tentative bidding date' : 'Bidding starts'} \u2022 price band ${
           ipo.priceBandHigh ? `\u20B9${ipo.priceBandLow}\u2013\u20B9${ipo.priceBandHigh}` : 'to be announced'
         }.`,
         date: openAt,
@@ -108,47 +109,51 @@ export function planForIpo(ipo: IPO, prefs: NotifPrefs): ScheduledPlan[] {
     if (isFuture(eveAt) && eveAt.getTime() > today.getTime()) {
       plans.push({
         id: `${ipo.id}-open-eve`,
-        title: `${ipo.name} opens tomorrow`,
-        body: 'Keep your UPI mandate ready to apply.',
+        title: `${ipo.name} opens ${openTentative ? 'tentatively ' : ''}tomorrow`,
+        body: openTentative ? 'This IPO opening date is tentative; check the latest exchange notice.' : 'Keep your UPI mandate ready to apply.',
         date: eveAt,
       });
     }
   }
 
   if (prefs.lastDay) {
+    const closeTentative = ipo.tentativeDates.includes('close');
     const lastAt = atHour(ipo.closeDate, 9, 15);
     if (isFuture(lastAt)) {
       plans.push({
         id: `${ipo.id}-close`,
-        title: `Last day to apply \u2013 ${ipo.name}`,
-        body: `Bidding closes at 5 PM on ${parseISO(ipo.closeDate).toLocaleDateString('en-GB', {
+        title: `Last day to apply \u2013 ${ipo.name}${closeTentative ? ' (tentative date)' : ''}`,
+        body: `Bidding is scheduled to close at 5 PM on ${parseISO(ipo.closeDate).toLocaleDateString('en-GB', {
           day: 'numeric',
           month: 'short',
-        })}.`,
+        })}${closeTentative ? ' (tentative; verify with the exchange)' : ''}.`,
         date: lastAt,
       });
     }
   }
 
   if (prefs.allotment) {
+    const allotTentative = ipo.tentativeDates.includes('allotment');
     const allotAt = atHour(ipo.allotmentDate, 11, 0);
     if (isFuture(allotAt)) {
       plans.push({
         id: `${ipo.id}-allot`,
-        title: `${ipo.name}: allotment day`,
-        body: 'Basis of allotment is expected to be finalised today. Check your ASBA account.',
+        title: `${ipo.name}: allotment ${allotTentative ? 'tentatively ' : ''}expected`,
+        body: `${allotTentative ? 'Tentative date' : 'Basis of allotment is expected'}; check your ASBA account for the official result.`,
         date: allotAt,
       });
     }
   }
 
   if (prefs.listing) {
+    const listingTentative = ipo.tentativeDates.includes('listing');
+    const exchanges = ipo.exchanges.filter((exchange) => exchange !== 'Not reported').join(' & ') || 'the exchange';
     const listAt = atHour(ipo.listingDate, 9, 15);
     if (isFuture(listAt)) {
       plans.push({
         id: `${ipo.id}-list`,
-        title: `${ipo.name} lists today`,
-        body: `Shares are expected to debut on ${ipo.exchanges.join(' & ')}.`,
+        title: `${ipo.name} ${listingTentative ? 'tentatively ' : ''}lists today`,
+        body: `Shares are expected to debut on ${exchanges}${listingTentative ? '; date is tentative' : ''}.`,
         date: listAt,
       });
     }

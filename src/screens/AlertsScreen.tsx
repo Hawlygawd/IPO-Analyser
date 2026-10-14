@@ -48,7 +48,7 @@ export function AlertsScreen({ theme }: { theme: Theme }) {
               </Text>
               <Text style={{ fontSize: 12, color: theme.textSub, marginTop: 3, lineHeight: 17 }}>
                 {permission === 'unsupported'
-                  ? 'Local push alerts fire on the iOS and Android builds. The web preview logs every reminder here instead.'
+                  ? 'Local push reminders are supported on iOS and Android. In the web preview, this tab keeps your saved watchlist activity.'
                   : 'Get a nudge on open day, the last day to apply, allotment and listing.'}
               </Text>
             </View>

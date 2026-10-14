@@ -1,4 +1,4 @@
-import { IPO } from './types';
+import { IPO, SubscriptionSplit } from './types';
 
 export function parseISO(iso: string): Date {
   const [y, m, d] = iso.split('-').map(Number);
@@ -33,6 +33,47 @@ export function formatRupees(value: number): string {
 
 export function formatDec(value: number, digits = 2): string {
   return value.toFixed(digits);
+}
+
+export interface SubscriptionCategoryValue {
+  key: keyof SubscriptionSplit;
+  label: string;
+  value: number;
+}
+
+/** Returns only investor-category subscription values, not the issue total. */
+export function subscriptionCategoryRows(subscription?: SubscriptionSplit): SubscriptionCategoryValue[] {
+  if (!subscription) return [];
+  const rows: SubscriptionCategoryValue[] = [];
+  const add = (key: keyof SubscriptionSplit, label: string, value?: number) => {
+    if (value != null && Number.isFinite(value)) rows.push({ key, label, value });
+  };
+  add('qib', 'QIB', subscription.qib);
+  if (
+    (subscription.sNii != null && subscription.bNii != null) ||
+    (subscription.nii == null && (subscription.sNii != null || subscription.bNii != null))
+  ) {
+    add('sNii', 'sNII', subscription.sNii);
+    add('bNii', 'bNII', subscription.bNii);
+  } else {
+    add('nii', 'NII / HNI', subscription.nii);
+  }
+  add('retail', 'Retail', subscription.retail);
+  add('employee', 'Employee', subscription.employee);
+  add('shareholder', 'Shareholder', subscription.shareholder);
+  return rows;
+}
+
+export function formatUpdatedAt(value?: string | number): string {
+  if (value == null) return 'Not synced yet';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Not synced yet';
+  return date.toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 /** 12 Sep / 12 Sep 2025 */
