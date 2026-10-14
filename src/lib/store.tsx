@@ -13,11 +13,15 @@ import { AlertLogItem, NotifPrefs, IPO } from './types';
 import { ThemeMode } from '../theme';
 import { darkTheme, lightTheme, Theme } from '../theme';
 import { getIpo, IPOT } from './ipoData';
+import { phaseOf } from './analysis';
 import {
-  cancelIds,
+  cancelRemindersFor,
   getPermissionState,
+  joinLabels,
   notificationsSupported,
+  planForIpo,
   requestPermission,
+  ScheduleResult,
   scheduleForIpo,
 } from './notifications';
 
@@ -125,21 +129,52 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const scheduleIpo = useCallback(
-    async (ipo: IPO) => {
-      await cancelIds(notifIds.current[ipo.id] ?? []);
-      const ids = await scheduleForIpo(ipo, prefs);
-      notifIds.current = { ...notifIds.current, [ipo.id]: ids };
+    async (ipo: IPO): Promise<ScheduleResult> => {
+      await cancelRemindersFor(ipo.id, notifIds.current[ipo.id]);
+      const result = await scheduleForIpo(ipo, prefs);
+      notifIds.current = { ...notifIds.current, [ipo.id]: result.ids };
       persist(KEY_IDS, notifIds.current);
-      return ids.length;
+      return result;
     },
     [prefs, persist]
+  );
+
+  /**
+   * Cancels and re-creates reminders for the given watchlist with the given preferences.
+   * Old reminders are always cancelled first - previously a reminder type that had been switched
+   * off kept firing because re-scheduling never removed it.
+   */
+  const syncQueue = useRef<Promise<void>>(Promise.resolve());
+  const syncReminders = useCallback(
+    (ids: string[], nextPrefs: NotifPrefs): Promise<void> => {
+      const run = async () => {
+        const all: Record<string, string[]> = {};
+        for (const [id, known] of Object.entries(notifIds.current)) {
+          if (!ids.includes(id)) await cancelRemindersFor(id, known);
+        }
+        for (const id of ids) {
+          await cancelRemindersFor(id, notifIds.current[id]);
+          const ipo = getIpo(id);
+          if (!ipo) continue;
+          all[id] = (await scheduleForIpo(ipo, nextPrefs)).ids;
+        }
+        notifIds.current = all;
+        persist(KEY_IDS, all);
+      };
+      // Serialise runs: quick successive toggles must not interleave cancel/schedule calls
+      // (that could leave reminders from both the old and new settings scheduled).
+      const next = syncQueue.current.then(run, run);
+      syncQueue.current = next.catch(() => undefined);
+      return next;
+    },
+    [persist]
   );
 
   const toggleWatch = useCallback(
     async (ipo: IPO) => {
       const isOn = watchlist.includes(ipo.id);
       if (isOn) {
-        await cancelIds(notifIds.current[ipo.id] ?? []);
+        await cancelRemindersFor(ipo.id, notifIds.current[ipo.id]);
         const rest = { ...notifIds.current };
         delete rest[ipo.id];
         notifIds.current = rest;
@@ -159,18 +194,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const next = [ipo.id, ...watchlist];
       setWatchlist(next);
       persist(KEY_WATCH, next);
-      const count = await scheduleIpo(ipo);
+      const result = await scheduleIpo(ipo);
       logAlert({
         ipoId: ipo.id,
         ipoName: ipo.name,
         kind: 'watch',
         title: `${ipo.name} added to watchlist`,
-        body:
-          count > 0
-            ? `${count} reminder${count === 1 ? '' : 's'} scheduled \u2013 open day, allotment and listing.`
-            : notificationsSupported()
-              ? 'Turn on notifications in Settings to receive reminders.'
-              : 'Reminders are available on the mobile app.',
+        body: watchMessage(ipo, result),
       });
       return true;
     },
@@ -178,14 +208,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const rescheduleAll = useCallback(async () => {
-    const all: Record<string, string[]> = {};
-    for (const id of watchlist) {
-      const ipo = getIpo(id);
-      if (!ipo) continue;
-      all[id] = await scheduleForIpo(ipo, prefs);
-    }
-    notifIds.current = all;
-    persist(KEY_IDS, all);
+    await syncReminders(watchlist, prefs);
     logAlert({
       ipoId: '-',
       ipoName: 'Reminders',
@@ -193,15 +216,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       title: 'Reminders refreshed',
       body: `${watchlist.length} watched IPO${watchlist.length === 1 ? '' : 's'} re-synced with your schedule.`,
     });
-  }, [watchlist, prefs, persist, logAlert]);
+  }, [watchlist, prefs, syncReminders, logAlert]);
 
   const setPref = useCallback(
     async (key: keyof NotifPrefs, value: boolean) => {
       const next = { ...prefs, [key]: value };
       setPrefs(next);
       persist(KEY_PREFS, next);
+      // Apply the change to reminders that are already scheduled (switching a type off used to
+      // have no effect until "Reschedule my reminders" was tapped - and not even then).
+      if (permission === 'granted' && watchlist.length > 0) {
+        await syncReminders(watchlist, next);
+      }
     },
-    [prefs, persist]
+    [prefs, persist, permission, watchlist, syncReminders]
   );
 
   const enableNotifications = useCallback(async () => {
@@ -299,3 +327,21 @@ export function useStore(): StoreValue {
 }
 
 export const TOTAL_IPO_COUNT = IPOT.length;
+
+/** Alert-log copy after starring an IPO - says exactly what was (or wasn't) scheduled and why. */
+function watchMessage(ipo: IPO, result: ScheduleResult): string {
+  const count = result.ids.length;
+  if (count > 0) {
+    return `${count} reminder${count === 1 ? '' : 's'} scheduled \u2013 ${joinLabels(result.labels)}.`;
+  }
+  if (result.blocked === 'unsupported') return 'Reminders are available on the mobile app.';
+  if (result.blocked === 'permission') return 'Turn on notifications in Settings to receive reminders.';
+  if (phaseOf(ipo).key === 'awaiting') {
+    return 'Its dates haven\u2019t been confirmed yet, so no reminders were scheduled.';
+  }
+  const allOn: NotifPrefs = { openDay: true, lastDay: true, allotment: true, listing: true };
+  if (planForIpo(ipo, allOn).length > 0) {
+    return 'None of its remaining dates match your reminder settings.';
+  }
+  return 'All key dates for this IPO have passed \u2013 there is nothing left to remind you about.';
+}

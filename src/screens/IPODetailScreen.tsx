@@ -7,9 +7,11 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { getIpo } from '../lib/ipoData';
+import { DATA_AS_OF_DATE, getIpo } from '../lib/ipoData';
 import { gmpPercent, formatCr, formatDay, formatRupees, lotInvestment } from '../lib/format';
-import { computeTrend, gmpSeries, insights, nextMilestone, phaseOf, sentiment } from '../lib/analysis';
+import { computeTrend, dateLine, gmpSeries, insights, nextMilestone, phaseOf, sentiment } from '../lib/analysis';
+import { planForIpo } from '../lib/notifications';
+import { IpoPhase } from '../lib/types';
 import { Avatar, Button, Chip, Row, SectionCard } from '../components/ui';
 import { GmpBarChart, SubscriptionBars } from '../components/Charts';
 import { MilestoneTimeline } from '../components/Milestone';
@@ -21,7 +23,7 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'IPODetail'>>();
   const insets = useSafeAreaInsets();
-  const { isWatched, toggleWatch, permission } = useStore();
+  const { isWatched, toggleWatch, permission, prefs } = useStore();
 
   const ipo = getIpo(route.params.id);
 
@@ -50,11 +52,13 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
   const milestone = nextMilestone(ipo);
   const investment = lotInvestment(ipo);
   const s = ipo.subscription;
+  // Only promise reminders when something can actually fire (future dates + permission granted).
+  const remindersOn = watched && permission === 'granted' && planForIpo(ipo, prefs).length > 0;
 
   const onShare = async () => {
     try {
       await Share.share({
-        message: `${ipo.name} IPO (${ipo.segment})\nGMP: ${ipo.gmp != null ? `${formatRupees(ipo.gmp)} (${pct != null ? `${pct.toFixed(1)}%` : 'band TBA'})` : 'n/a'}\nOpens ${formatDay(ipo.openDate, true)} \u2022 ${ipo.exchanges.join(' & ')}\n\nShared from IPO Pulse`,
+        message: `${ipo.name} IPO (${ipo.segment})\nGMP: ${ipo.gmp != null ? `${formatRupees(ipo.gmp)} (${pct != null ? `${pct.toFixed(1)}%` : 'band TBA'})` : 'n/a'}\n${dateLine(ipo)} \u2022 ${ipo.exchanges.join(' & ')}\n\nShared from IPO Pulse`,
       });
     } catch {
       // user cancelled
@@ -147,12 +151,14 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
 
             <View style={{ marginTop: 18 }}>
               <Text style={{ fontSize: 11, fontWeight: '800', color: theme.textMuted, letterSpacing: 0.6, marginBottom: 10 }}>
-                GMP \u2022 LAST 7 SESSIONS (\u20B9)
+                {'GMP \u2022 LAST 7 SESSIONS (\u20B9)'}
               </Text>
               <GmpBarChart
                 theme={theme}
                 values={analysis.series}
-                labels={[formatDay(ipo.openDate), 'Today']}
+                // Figures come from the board snapshot, not "today" - and the first bar has nothing
+                // to do with the opening date (which may still be in the future).
+                labels={['6 sessions earlier', `Latest \u2022 ${formatDay(DATA_AS_OF_DATE)}`]}
               />
             </View>
 
@@ -191,7 +197,7 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
           <Animated.View entering={FadeInDown.delay(110).duration(320)}>
             <SectionCard theme={theme} title="Subscription" style={{ marginTop: 14 }}>
               <Text style={{ fontSize: 13, color: theme.textSub, lineHeight: 20 }}>
-                Bidding has not started yet. Category-wise subscription updates appear here from the opening day.
+                {noSubscriptionText(phase.key)}
               </Text>
             </SectionCard>
           </Animated.View>
@@ -253,8 +259,8 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
       >
         <Button
           theme={theme}
-          label={watched ? 'Watching \u2022 reminders on' : 'Add to watchlist'}
-          icon={watched ? 'notifications' : 'add'}
+          label={watched ? (remindersOn ? 'Watching \u2022 reminders on' : 'Watching') : 'Add to watchlist'}
+          icon={watched ? (remindersOn ? 'notifications' : 'star') : 'add'}
           variant={watched ? 'soft' : 'primary'}
           onPress={() => toggleWatch(ipo)}
           style={{ flex: 1 }}
@@ -267,6 +273,20 @@ export function IPODetailScreen({ theme }: { theme: Theme }) {
       </View>
     </View>
   );
+}
+
+/** Subscription card copy when the board has no category-wise figures for this issue. */
+function noSubscriptionText(phase: IpoPhase): string {
+  switch (phase) {
+    case 'upcoming':
+      return 'Bidding has not started yet. Category-wise subscription updates appear here from the opening day.';
+    case 'awaiting':
+      return 'The indicative dates for this issue have passed without confirmation, so bidding may not have opened yet. Subscription figures will appear here once it does.';
+    case 'open':
+      return 'Bidding is live. Category-wise subscription figures will appear here with the next board update.';
+    default:
+      return 'Bidding for this issue has closed. Final category-wise subscription figures were not captured on this board.';
+  }
 }
 
 function HeroStat({

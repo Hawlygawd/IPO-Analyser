@@ -35,16 +35,33 @@ export function formatDec(value: number, digits = 2): string {
   return value.toFixed(digits);
 }
 
+// Fixed month / weekday names: `toLocaleDateString` output differs between engines
+// (e.g. "Sept" on newer ICU vs "Sep" elsewhere), which made dates inconsistent across screens.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function formatDate(d: Date, withYear: boolean): string {
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}${withYear ? ` ${d.getFullYear()}` : ''}`;
+}
+
 /** 12 Sep / 12 Sep 2025 */
 export function formatDay(iso: string, withYear = false): string {
+  return formatDate(parseISO(iso), withYear);
+}
+
+/** Tue, 12 Sep */
+export function formatWeekday(iso: string): string {
   const d = parseISO(iso);
-  const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
-  if (withYear) opts.year = 'numeric';
-  return d.toLocaleDateString('en-GB', opts);
+  return `${WEEKDAYS[d.getDay()]}, ${formatDate(d, false)}`;
 }
 
 export function formatDayDate(d: Date): string {
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return formatDate(d, true);
+}
+
+/** "1 day" / "3 days" */
+export function pluralDays(n: number): string {
+  return `${n} day${n === 1 ? '' : 's'}`;
 }
 
 export function relativeDay(iso: string): string {
@@ -53,8 +70,8 @@ export function relativeDay(iso: string): string {
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tomorrow';
   if (diff === -1) return 'Yesterday';
-  if (diff > 1) return `in ${diff} days`;
-  return `${Math.abs(diff)} days ago`;
+  if (diff > 1) return `in ${pluralDays(diff)}`;
+  return `${pluralDays(Math.abs(diff))} ago`;
 }
 
 /** GMP as a percentage of the upper price band, or null when the band is TBA. */

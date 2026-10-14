@@ -8,6 +8,12 @@ import { IPO } from './types';
  */
 export const DATA_AS_OF = '2026-09-05T19:45:00+05:30';
 export const DATA_AS_OF_LABEL = '5 Sep 2026, 7:45 PM IST';
+/**
+ * Calendar day (YYYY-MM-DD, IST) of the snapshot above. A date flagged in `tentativeDates`
+ * that falls *after* this day was never confirmed by the board, so the app must not assume
+ * that milestone actually happened just because the calendar has moved past it.
+ */
+export const DATA_AS_OF_DATE = DATA_AS_OF.slice(0, 10);
 
 export const IPOT: IPO[] = [
   {

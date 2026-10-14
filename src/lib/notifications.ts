@@ -1,7 +1,11 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { IPO, NotifPrefs } from './types';
-import { parseISO, addDays, startOfToday } from './format';
+import { DateKey, IPO, NotifPrefs } from './types';
+import { parseISO, startOfToday, formatDay } from './format';
+import { isUnconfirmed, phaseOf } from './analysis';
+
+/** Android channel for reminders. Scheduled notifications must reference it via `trigger.channelId`. */
+const CHANNEL_ID = 'reminders';
 
 let handlerInstalled = false;
 let channelInstalled = false;
@@ -11,7 +15,7 @@ export function setupNotificationChannel(): void {
   if (Platform.OS !== 'android' || channelInstalled) return;
   channelInstalled = true;
   try {
-    Notifications.setNotificationChannelAsync('reminders', {
+    Notifications.setNotificationChannelAsync(CHANNEL_ID, {
       name: 'IPO reminders',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 200, 120, 200],
@@ -79,38 +83,66 @@ function isFuture(date: Date): boolean {
   return date.getTime() > Date.now() + 5 * 60 * 1000;
 }
 
+type ReminderKind = 'open-eve' | 'open' | 'close' | 'allot' | 'list';
+
+const KIND_ORDER: ReminderKind[] = ['open-eve', 'open', 'close', 'allot', 'list'];
+
+const KIND_LABEL: Record<ReminderKind, string> = {
+  'open-eve': 'day before opening',
+  open: 'opening day',
+  close: 'last day to apply',
+  allot: 'allotment',
+  list: 'listing',
+};
+
+/** Every identifier this app may have scheduled for an IPO (identifiers are deterministic). */
+export function reminderIdsFor(ipoId: string): string[] {
+  return KIND_ORDER.map((kind) => `${ipoId}-${kind}`);
+}
+
 interface ScheduledPlan {
   id: string;
+  kind: ReminderKind;
   title: string;
   body: string;
   date: Date;
 }
 
+function tentativeNote(ipo: IPO, key: DateKey): string {
+  return isUnconfirmed(ipo, key) ? ' Date is tentative \u2013 confirm before you bid.' : '';
+}
+
 /** Builds the reminder set for a watched IPO based on the user's preferences. */
 export function planForIpo(ipo: IPO, prefs: NotifPrefs): ScheduledPlan[] {
+  // The indicative opening date has already lapsed without confirmation, so any later
+  // dates on the board are unreliable too - don't schedule reminders for them.
+  if (phaseOf(ipo).key === 'awaiting') return [];
+
   const plans: ScheduledPlan[] = [];
   const today = startOfToday();
 
   if (prefs.openDay) {
-    const openAt = atHour(ipo.openDate, 8, 45);
-    if (isFuture(openAt)) {
-      plans.push({
-        id: `${ipo.id}-open`,
-        title: `${ipo.name} opens today`,
-        body: `Bidding starts now \u2022 price band ${
-          ipo.priceBandHigh ? `\u20B9${ipo.priceBandLow}\u2013\u20B9${ipo.priceBandHigh}` : 'to be announced'
-        }.`,
-        date: openAt,
-      });
-    }
     const eveAt = new Date(atHour(ipo.openDate, 18, 0).getTime());
     eveAt.setDate(eveAt.getDate() - 1);
     if (isFuture(eveAt) && eveAt.getTime() > today.getTime()) {
       plans.push({
         id: `${ipo.id}-open-eve`,
+        kind: 'open-eve',
         title: `${ipo.name} opens tomorrow`,
-        body: 'Keep your UPI mandate ready to apply.',
+        body: `Keep your UPI mandate ready to apply.${tentativeNote(ipo, 'open')}`,
         date: eveAt,
+      });
+    }
+    const openAt = atHour(ipo.openDate, 8, 45);
+    if (isFuture(openAt)) {
+      plans.push({
+        id: `${ipo.id}-open`,
+        kind: 'open',
+        title: `${ipo.name} opens today`,
+        body: `Bidding starts now \u2022 price band ${
+          ipo.priceBandHigh ? `\u20B9${ipo.priceBandLow}\u2013\u20B9${ipo.priceBandHigh}` : 'to be announced'
+        }.${tentativeNote(ipo, 'open')}`,
+        date: openAt,
       });
     }
   }
@@ -120,11 +152,9 @@ export function planForIpo(ipo: IPO, prefs: NotifPrefs): ScheduledPlan[] {
     if (isFuture(lastAt)) {
       plans.push({
         id: `${ipo.id}-close`,
+        kind: 'close',
         title: `Last day to apply \u2013 ${ipo.name}`,
-        body: `Bidding closes at 5 PM on ${parseISO(ipo.closeDate).toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-        })}.`,
+        body: `Bidding closes at 5 PM on ${formatDay(ipo.closeDate)}.${tentativeNote(ipo, 'close')}`,
         date: lastAt,
       });
     }
@@ -135,8 +165,9 @@ export function planForIpo(ipo: IPO, prefs: NotifPrefs): ScheduledPlan[] {
     if (isFuture(allotAt)) {
       plans.push({
         id: `${ipo.id}-allot`,
+        kind: 'allot',
         title: `${ipo.name}: allotment day`,
-        body: 'Basis of allotment is expected to be finalised today. Check your ASBA account.',
+        body: `Basis of allotment is expected to be finalised today. Check your ASBA account.${tentativeNote(ipo, 'allotment')}`,
         date: allotAt,
       });
     }
@@ -147,8 +178,9 @@ export function planForIpo(ipo: IPO, prefs: NotifPrefs): ScheduledPlan[] {
     if (isFuture(listAt)) {
       plans.push({
         id: `${ipo.id}-list`,
+        kind: 'list',
         title: `${ipo.name} lists today`,
-        body: `Shares are expected to debut on ${ipo.exchanges.join(' & ')}.`,
+        body: `Shares are expected to debut on ${ipo.exchanges.join(' & ')}.${tentativeNote(ipo, 'listing')}`,
         date: listAt,
       });
     }
@@ -157,27 +189,40 @@ export function planForIpo(ipo: IPO, prefs: NotifPrefs): ScheduledPlan[] {
   return plans.slice(0, 6);
 }
 
-/** Schedules local notifications and returns their ids (empty on web). */
-export async function scheduleForIpo(ipo: IPO, prefs: NotifPrefs): Promise<string[]> {
-  if (!notificationsSupported()) return [];
-  const granted = await getPermissionState();
-  if (granted !== 'granted') return [];
-  installHandler();
+export interface ScheduleResult {
+  /** identifiers of the notifications that were scheduled */
+  ids: string[];
+  /** human-readable reminder kinds that were scheduled, in chronological order */
+  labels: string[];
+  /** set when there *were* future reminders to schedule but the platform/permission blocked them */
+  blocked?: 'unsupported' | 'permission';
+}
+
+/** Schedules local notifications for an IPO (nothing on web). */
+export async function scheduleForIpo(ipo: IPO, prefs: NotifPrefs): Promise<ScheduleResult> {
   const plans = planForIpo(ipo, prefs);
+  if (plans.length === 0) return { ids: [], labels: [] };
+  if (!notificationsSupported()) return { ids: [], labels: [], blocked: 'unsupported' };
+  const granted = await getPermissionState();
+  if (granted !== 'granted') return { ids: [], labels: [], blocked: 'permission' };
+  installHandler();
   const ids: string[] = [];
+  const labels: string[] = [];
   for (const plan of plans) {
     try {
       const id = await Notifications.scheduleNotificationAsync({
         identifier: plan.id,
         content: { title: plan.title, body: plan.body, data: { ipoId: ipo.id } },
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: plan.date },
+        // Without `channelId`, Android 8+ posts to the default channel instead of "IPO reminders".
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: plan.date, channelId: CHANNEL_ID },
       });
       ids.push(id);
+      labels.push(KIND_LABEL[plan.kind]);
     } catch {
       // ignore individual failures (e.g. platform not ready)
     }
   }
-  return ids;
+  return { ids, labels };
 }
 
 export async function cancelIds(ids: string[]): Promise<void> {
@@ -189,6 +234,14 @@ export async function cancelIds(ids: string[]): Promise<void> {
   }
 }
 
+/**
+ * Cancels every reminder for an IPO: the ids we remember *and* all deterministic identifiers, so a
+ * reminder type that was switched off (or ids lost from storage) can't keep firing.
+ */
+export async function cancelRemindersFor(ipoId: string, knownIds: string[] = []): Promise<void> {
+  await cancelIds([...new Set([...knownIds, ...reminderIdsFor(ipoId)])]);
+}
+
 export async function cancelAll(): Promise<void> {
   if (!notificationsSupported()) return;
   try {
@@ -196,4 +249,10 @@ export async function cancelAll(): Promise<void> {
   } catch {
     // no-op
   }
+}
+
+/** "a, b and c" */
+export function joinLabels(labels: string[]): string {
+  if (labels.length <= 1) return labels.join('');
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
 }

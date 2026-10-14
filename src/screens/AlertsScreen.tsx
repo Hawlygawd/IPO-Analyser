@@ -64,7 +64,7 @@ export function AlertsScreen({ theme }: { theme: Theme }) {
           theme={theme}
           icon="notifications-outline"
           title="No alerts yet"
-          message="Add an IPO to your watchlist and its key dates \u2014 open, close, allotment and listing \u2014 will be queued here."
+          message="Add an IPO to your watchlist and its key dates — open, close, allotment and listing — will be queued here."
         />
       ) : (
         <FlatList

@@ -1,6 +1,13 @@
 export type Segment = 'Mainboard' | 'SME';
 
-export type IpoPhase = 'upcoming' | 'open' | 'allotment' | 'listed';
+/**
+ * `awaiting` = the issue's indicative opening date has passed but the board never confirmed it,
+ * so we can't tell whether it opened, closed or listed.
+ */
+export type IpoPhase = 'upcoming' | 'awaiting' | 'open' | 'allotment' | 'listed';
+
+/** Keys used in `IPO.tentativeDates`. */
+export type DateKey = 'open' | 'close' | 'allotment' | 'listing';
 
 export interface SubscriptionSplit {
   qib?: number;
@@ -20,8 +27,8 @@ export interface IPO {
   closeDate: string;
   allotmentDate: string;
   listingDate: string;
-  /** dates that are provisional / not yet confirmed by the exchange */
-  tentativeDates: string[];
+  /** dates that are provisional / not yet confirmed by the exchange (as of the board snapshot) */
+  tentativeDates: DateKey[];
   priceBandLow?: number;
   priceBandHigh?: number;
   lotSize?: number;

@@ -7,7 +7,7 @@ import { Theme } from '../theme';
 import { useStore } from '../lib/store';
 import { DATA_AS_OF_LABEL } from '../lib/ipoData';
 import { diffDays, formatDay, parseISO, startOfToday } from '../lib/format';
-import { nextMilestone } from '../lib/analysis';
+import { nextMilestone, phaseOf } from '../lib/analysis';
 import { IPOCard } from '../components/IPOCard';
 import { EmptyState } from '../components/ui';
 import { ScreenHeader } from '../components/ScreenHeader';
@@ -20,7 +20,9 @@ export function WatchlistScreen({ theme }: { theme: Theme }) {
 
   const nextEvent = useMemo(() => {
     const upcoming = watchedIpos
-      .map((ipo) => ({ ipo, step: nextMilestone(ipo) }))
+      // Issues whose indicative dates lapsed unconfirmed have no reliable "next event".
+      .filter((ipo) => phaseOf(ipo, today).key !== 'awaiting')
+      .map((ipo) => ({ ipo, step: nextMilestone(ipo, today) }))
       .filter((x) => diffDays(today, parseISO(x.step.date)) >= 0)
       .sort((a, b) => a.step.date.localeCompare(b.step.date));
     return upcoming[0] ?? null;
@@ -46,7 +48,7 @@ export function WatchlistScreen({ theme }: { theme: Theme }) {
           theme={theme}
           icon="star-outline"
           title="Nothing on your watchlist yet"
-          message="Star an IPO to track its GMP, subscription and key dates in one place \u2014 and get a reminder on open, allotment and listing days."
+          message="Star an IPO to track its GMP, subscription and key dates in one place — and get a reminder on open, allotment and listing days."
           actionLabel="Browse live IPOs"
           onAction={() => navigation.navigate('Tabs', { screen: 'IPOs' })}
         />
@@ -89,7 +91,7 @@ export function WatchlistScreen({ theme }: { theme: Theme }) {
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 0.6, color: theme.textMuted }}>NEXT EVENT</Text>
                     <Text style={{ fontSize: 13.5, fontWeight: '800', color: theme.text, marginTop: 3 }} numberOfLines={1}>
-                      {nextEvent.ipo.name} \u2022 {nextEvent.step.label.toLowerCase()}
+                      {`${nextEvent.ipo.name} \u2022 ${nextEvent.step.label.toLowerCase()}`}
                     </Text>
                     <Text style={{ fontSize: 11.5, color: theme.textSub, marginTop: 2 }}>
                       {formatDay(nextEvent.step.date, true)}

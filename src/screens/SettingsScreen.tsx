@@ -112,19 +112,19 @@ export function SettingsScreen({ theme }: { theme: Theme }) {
         <SectionCard theme={theme} title="Data" style={{ marginTop: 14 }}>
           <RowLine theme={theme} label="Board updated" value={DATA_AS_OF_LABEL} />
           <RowLine theme={theme} label="IPOs tracked" value={String(IPOT.length)} />
-          <RowLine theme={theme} label="Sources" value="IPO Ji \u2022 IPO Watch \u2022 IPO Central \u2022 ET Now \u2022 NDTV Profit" />
+          <RowLine theme={theme} label="Sources" value="IPO Ji • IPO Watch • IPO Central • ET Now • NDTV Profit" />
           <Button theme={theme} label="Refresh board" variant="ghost" icon="refresh" onPress={refresh} style={{ marginTop: 12 }} />
         </SectionCard>
 
         <SectionCard theme={theme} title="About" style={{ marginTop: 14 }}>
           <Text style={{ fontSize: 13, color: theme.textSub, lineHeight: 20 }}>
             IPO Pulse keeps the season simple: grey market premium, subscription, trend and the four dates
-            that matter. Tap any IPO for a plain-language take \u2014 no charts you need a finance degree for.
+            that matter. Tap any IPO for a plain-language take — no charts you need a finance degree for.
           </Text>
           <View style={[styles.aboutPill, { backgroundColor: theme.cardAlt }]}>
             <Ionicons name="shield-checkmark-outline" size={15} color={theme.primary} />
             <Text style={{ flex: 1, fontSize: 12, color: theme.textSub, lineHeight: 17 }}>
-              Grey market data is unofficial and indicative. Nothing here is investment advice \u2014 always
+              Grey market data is unofficial and indicative. Nothing here is investment advice — always
               read the RHP before applying.
             </Text>
           </View>

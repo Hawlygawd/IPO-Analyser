@@ -7,8 +7,8 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { radius, Theme } from '../theme';
 import { useStore } from '../lib/store';
 import { IPOT, DATA_AS_OF_LABEL } from '../lib/ipoData';
-import { gmpPercent } from '../lib/format';
-import { computeTrend, gmpSeries } from '../lib/analysis';
+import { gmpPercent, startOfToday } from '../lib/format';
+import { computeTrend, phaseOf } from '../lib/analysis';
 import { Avatar, EmptyState } from '../components/ui';
 import { SegmentedTabs } from '../components/SegmentedTabs';
 import { ScreenHeader } from '../components/ScreenHeader';
@@ -24,11 +24,10 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const today = startOfToday();
     const scored = IPOT.map((ipo) => {
       const pct = gmpPercent(ipo);
-      const series = gmpSeries(ipo);
-      const delta = series[series.length - 1] - series[0];
-      return { ipo, pct, delta, trend: computeTrend(ipo) };
+      return { ipo, pct, trend: computeTrend(ipo), listed: phaseOf(ipo, today).key === 'listed' };
     });
     const filtered = scored.filter((row) => {
       if (q && !row.ipo.name.toLowerCase().includes(q) && !row.ipo.sector.toLowerCase().includes(q)) return false;
@@ -37,7 +36,9 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
       if (filter === 'gainers') return (row.pct ?? -999) >= 12;
       return true;
     });
-    filtered.sort((a, b) => (b.pct ?? -999) - (a.pct ?? -999));
+    // Live grey-market quotes first. Issues that have already listed keep their last tracked GMP,
+    // but they no longer trade in the grey market, so they shouldn't outrank live issues.
+    filtered.sort((a, b) => Number(a.listed) - Number(b.listed) || (b.pct ?? -999) - (a.pct ?? -999));
     return filtered;
   }, [query, filter]);
 
@@ -89,7 +90,7 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
         contentContainerStyle={{ paddingBottom: 34 }}
         showsVerticalScrollIndicator={false}
         renderItem={({ item, index }) => {
-          const { ipo, pct, trend } = item;
+          const { ipo, pct, trend, listed } = item;
           const tone = pct == null ? 'neutral' : pct >= 12 ? 'up' : pct >= 0 ? 'warn' : 'down';
           const fg = tone === 'up' ? theme.up : tone === 'warn' ? theme.warn : tone === 'down' ? theme.down : theme.textMuted;
           return (
@@ -109,7 +110,7 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
                     {ipo.name}
                   </Text>
                   <Text numberOfLines={1} style={{ fontSize: 11, color: theme.textMuted, marginTop: 2, fontWeight: '600' }}>
-                    {ipo.segment} \u2022 {ipo.gmp != null ? `GMP ${ipo.gmp > 0 ? '+' : ''}\u20B9${ipo.gmp}` : 'No quote'}
+                    {`${ipo.segment} \u2022 ${ipo.gmp != null ? `${listed ? 'Last GMP' : 'GMP'} ${ipo.gmp > 0 ? '+' : ''}\u20B9${ipo.gmp}` : 'No quote'}`}
                   </Text>
                 </View>
                 {isWatched(ipo.id) ? <Ionicons name="star" size={13} color={theme.warn} /> : null}
@@ -119,11 +120,11 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 2 }}>
                     <Ionicons
-                      name={trend.dir === 'up' ? 'trending-up' : trend.dir === 'down' ? 'trending-down' : 'remove'}
+                      name={listed ? 'checkmark-done' : trend.dir === 'up' ? 'trending-up' : trend.dir === 'down' ? 'trending-down' : 'remove'}
                       size={11}
                       color={theme.textMuted}
                     />
-                    <Text style={{ fontSize: 10.5, color: theme.textMuted, fontWeight: '700' }}>{trend.label}</Text>
+                    <Text style={{ fontSize: 10.5, color: theme.textMuted, fontWeight: '700' }}>{listed ? 'Listed' : trend.label}</Text>
                   </View>
                 </View>
               </Pressable>
@@ -140,7 +141,7 @@ export function GmpBoardScreen({ theme }: { theme: Theme }) {
         }
         ListFooterComponent={
           <Text style={{ fontSize: 11, color: theme.textMuted, textAlign: 'center', paddingHorizontal: 30, marginTop: 12, lineHeight: 16 }}>
-            GMP % is premium over the upper price band \u2022 shown as TBA when the band is not yet announced.
+            GMP % is premium over the upper price band • shown as TBA when the band is not yet announced. Listed issues show their last tracked GMP.
           </Text>
         }
       />

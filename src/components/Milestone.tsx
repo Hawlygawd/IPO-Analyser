@@ -2,41 +2,44 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Theme } from '../theme';
-import { IPO } from '../lib/types';
+import { DateKey, IPO } from '../lib/types';
 import { diffDays, formatDay, parseISO, startOfToday } from '../lib/format';
+import { isUnconfirmed, phaseOf } from '../lib/analysis';
 
 interface Step {
-  key: string;
+  key: DateKey;
   label: string;
   date: string;
   tentative: boolean;
+  passed: boolean;
 }
 
 export function MilestoneTimeline({ ipo, theme }: { ipo: IPO; theme: Theme }) {
   const today = startOfToday();
-  const steps: Step[] = [
-    { key: 'open', label: 'Opens for bidding', date: ipo.openDate, tentative: ipo.tentativeDates.includes('open') },
-    { key: 'close', label: 'Closes', date: ipo.closeDate, tentative: ipo.tentativeDates.includes('close') },
-    {
-      key: 'allotment',
-      label: 'Allotment finalised',
-      date: ipo.allotmentDate,
-      tentative: ipo.tentativeDates.includes('allotment'),
-    },
-    {
-      key: 'listing',
-      label: `Lists on ${ipo.exchanges.join(' & ')}`,
-      date: ipo.listingDate,
-      tentative: ipo.tentativeDates.includes('listing'),
-    },
+  // If the opening was never confirmed and its indicative date has gone by, none of the
+  // milestones can be shown as completed (previously they all got a green tick).
+  const awaiting = phaseOf(ipo, today).key === 'awaiting';
+  const raw: Omit<Step, 'tentative' | 'passed'>[] = [
+    { key: 'open', label: 'Opens for bidding', date: ipo.openDate },
+    { key: 'close', label: 'Closes', date: ipo.closeDate },
+    { key: 'allotment', label: 'Allotment finalised', date: ipo.allotmentDate },
+    { key: 'listing', label: `Lists on ${ipo.exchanges.join(' & ')}`, date: ipo.listingDate },
   ];
+  const steps: Step[] = raw.map((s) => ({
+    ...s,
+    tentative: isUnconfirmed(ipo, s.key),
+    passed: diffDays(today, parseISO(s.date)) < 0,
+  }));
+  const isDone = (s: Step) => s.passed && !awaiting;
 
   return (
     <View>
       {steps.map((step, i) => {
-        const done = diffDays(today, parseISO(step.date)) < 0;
-        const isNext = !done && steps.slice(0, i).every((s) => diffDays(today, parseISO(s.date)) < 0);
-        const color = done ? theme.up : isNext ? theme.primary : theme.textMuted;
+        const done = isDone(step);
+        const isNext = !done && steps.slice(0, i).every(isDone);
+        const lapsed = step.passed && awaiting;
+        const accent = awaiting ? theme.warn : theme.primary;
+        const color = done ? theme.up : isNext ? accent : theme.textMuted;
         return (
           <View key={step.key} style={styles.row}>
             <View style={{ alignItems: 'center', width: 24 }}>
@@ -44,7 +47,7 @@ export function MilestoneTimeline({ ipo, theme }: { ipo: IPO; theme: Theme }) {
                 style={[
                   styles.dot,
                   {
-                    backgroundColor: done ? theme.up : isNext ? theme.primary : theme.card,
+                    backgroundColor: done ? theme.up : isNext ? accent : theme.card,
                     borderColor: done || isNext ? color : theme.border,
                   },
                 ]}
@@ -59,7 +62,13 @@ export function MilestoneTimeline({ ipo, theme }: { ipo: IPO; theme: Theme }) {
               <Text style={[styles.label, { color: theme.text }]}>{step.label}</Text>
               <Text style={[styles.date, { color: theme.textMuted }]}>
                 {formatDay(step.date, true)}
-                {step.tentative ? '  (tentative)' : ''}
+                {lapsed ? (
+                  <Text style={{ color: theme.warn }}>{'  (was expected \u2022 not confirmed)'}</Text>
+                ) : step.tentative ? (
+                  '  (tentative)'
+                ) : (
+                  ''
+                )}
               </Text>
             </View>
           </View>

@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -248,13 +249,16 @@ export function EmptyState({
 
 /* ----------------------------------------------------------------- Skeleton */
 
+// The native animated module doesn't exist on web (RN logs a warning and falls back to JS).
+const NATIVE_DRIVER = Platform.OS !== 'web';
+
 function Pulse({ children, theme }: { children: React.ReactNode; theme: Theme }) {
   const value = useRef(new Animated.Value(0.45)).current;
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(value, { toValue: 1, duration: 750, useNativeDriver: true }),
-        Animated.timing(value, { toValue: 0.45, duration: 750, useNativeDriver: true }),
+        Animated.timing(value, { toValue: 1, duration: 750, useNativeDriver: NATIVE_DRIVER }),
+        Animated.timing(value, { toValue: 0.45, duration: 750, useNativeDriver: NATIVE_DRIVER }),
       ])
     );
     loop.start();

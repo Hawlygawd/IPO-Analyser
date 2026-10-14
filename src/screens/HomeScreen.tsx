@@ -6,10 +6,10 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { Theme } from '../theme';
 import { useStore } from '../lib/store';
-import { IPOT, DATA_AS_OF_LABEL } from '../lib/ipoData';
-import { IPO } from '../lib/types';
-import { diffDays, gmpPercent, parseISO, startOfToday } from '../lib/format';
-import { phaseOf } from '../lib/analysis';
+import { IPOT, DATA_AS_OF_DATE, DATA_AS_OF_LABEL } from '../lib/ipoData';
+import { IPO, IpoPhase } from '../lib/types';
+import { diffDays, formatDay, formatWeekday, gmpPercent, parseISO, pluralDays, startOfToday } from '../lib/format';
+import { isUnconfirmed, phaseOf } from '../lib/analysis';
 import { IPOCard } from '../components/IPOCard';
 import { SegmentedTabs } from '../components/SegmentedTabs';
 import { CardSkeleton } from '../components/ui';
@@ -29,57 +29,103 @@ export function HomeScreen({ theme }: { theme: Theme }) {
     return () => clearTimeout(t);
   }, []);
 
-  const today = startOfToday();
+  // Re-evaluated on every render (cheap), memoised per calendar day so lists roll over at midnight.
+  const todayKey = startOfToday().getTime();
 
-  const buckets = useMemo(() => {
+  const board = useMemo(() => {
+    const today = new Date(todayKey);
+    const phases = new Map<string, IpoPhase>(IPOT.map((ipo) => [ipo.id, phaseOf(ipo, today).key]));
     const open: IPO[] = [];
     const upcoming: IPO[] = [];
     const closed: IPO[] = [];
+    let liveCount = 0;
+    let soonCount = 0;
+    let awaitingCount = 0;
     for (const ipo of IPOT) {
-      const phase = phaseOf(ipo, today);
-      if (phase.key === 'open') open.push(ipo);
-      else if (phase.key === 'upcoming') {
+      const phase = phases.get(ipo.id);
+      if (phase === 'open') {
+        open.push(ipo);
+        liveCount += 1;
+      } else if (phase === 'upcoming') {
         const inWindow = diffDays(today, parseISO(ipo.openDate)) <= 6;
+        if (inWindow) soonCount += 1;
         (inWindow ? open : upcoming).push(ipo);
+      } else if (phase === 'awaiting') {
+        // Indicative dates lapsed without confirmation: still "upcoming", never "closed/listed".
+        upcoming.push(ipo);
+        awaitingCount += 1;
       } else closed.push(ipo);
     }
     open.sort((a, b) => a.closeDate.localeCompare(b.closeDate));
-    upcoming.sort((a, b) => a.openDate.localeCompare(b.openDate));
+    // Dated issues first, then the ones still waiting for confirmed dates.
+    upcoming.sort(
+      (a, b) =>
+        Number(phases.get(a.id) === 'awaiting') - Number(phases.get(b.id) === 'awaiting') ||
+        a.openDate.localeCompare(b.openDate)
+    );
     closed.sort((a, b) => b.listingDate.localeCompare(a.listingDate));
-    return { open, upcoming, closed };
-  }, [today]);
 
-  const literallyOpen = IPOT.filter((i) => phaseOf(i, today).key === 'open');
-  const nextUp = useMemo(
-    () => [...IPOT].sort((a, b) => a.openDate.localeCompare(b.openDate)).find((i) => phaseOf(i, today).key === 'upcoming'),
-    [today]
-  );
-  const strongCount = IPOT.filter((i) => {
-    const pct = gmpPercent(i);
-    return pct != null && pct >= 25;
-  }).length;
+    const nextUp = [...IPOT]
+      .sort((a, b) => a.openDate.localeCompare(b.openDate))
+      .find((i) => phases.get(i.id) === 'upcoming');
+    // GMP stops mattering once shares list - only count issues that haven't listed yet.
+    const strongCount = IPOT.filter((i) => {
+      const pct = gmpPercent(i);
+      return phases.get(i.id) !== 'listed' && pct != null && pct >= 25;
+    }).length;
 
-  const data = tab === 'open' ? buckets.open : tab === 'upcoming' ? buckets.upcoming : buckets.closed;
+    return { open, upcoming, closed, liveCount, soonCount, awaitingCount, nextUp, strongCount };
+  }, [todayKey]);
+
+  const today = new Date(todayKey);
+  const { nextUp } = board;
+  const nextUpIn = nextUp ? diffDays(today, parseISO(nextUp.openDate)) : 0;
+  const boardAgeDays = diffDays(parseISO(DATA_AS_OF_DATE), today);
+  const showStaleNotice = boardAgeDays >= 7;
+
+  const data = tab === 'open' ? board.open : tab === 'upcoming' ? board.upcoming : board.closed;
   const updatedTime = new Date(lastRefresh).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
 
   const SummaryStrip = (
     <View style={styles.summaryRow}>
-      <SummaryBox theme={theme} icon="radio-button-on" tone="up" label="Live now" value={String(literallyOpen.length)} />
+      <SummaryBox theme={theme} icon="radio-button-on" tone="up" label="Live now" value={String(board.liveCount)} />
+      {/* Only issues that haven't opened yet - live ones are already counted in "Live now". */}
       <SummaryBox
         theme={theme}
         icon="time-outline"
         tone="info"
         label="Opening ≤ 6 days"
-        value={String(buckets.open.length)}
+        value={String(board.soonCount)}
       />
-      <SummaryBox theme={theme} icon="trending-up" tone="warn" label="Strong GMP" value={String(strongCount)} />
+      <SummaryBox theme={theme} icon="trending-up" tone="warn" label="Strong GMP" value={String(board.strongCount)} />
     </View>
   );
 
   const header = (
     <View style={{ gap: 14, paddingHorizontal: 0 }}>
       {SummaryStrip}
-      {tab === 'open' && literallyOpen.length === 0 && nextUp ? (
+      {showStaleNotice ? (
+        <View style={[styles.banner, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: theme.infoSoft, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="hourglass-outline" size={17} color={theme.info} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.text, fontSize: 13, fontWeight: '800' }}>
+                {`Board last updated ${pluralDays(boardAgeDays)} ago`}
+              </Text>
+              <Text style={{ color: theme.textSub, fontSize: 11.5, marginTop: 2, lineHeight: 16 }}>
+                {`Figures are as of ${formatDay(DATA_AS_OF_DATE, true)}.${
+                  board.awaitingCount > 0
+                    ? ' Issues whose dates weren\u2019t confirmed by then are marked \u201CDates awaited\u201D under Upcoming.'
+                    : ''
+                }`}
+              </Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
+      {tab === 'open' && board.liveCount === 0 && nextUp ? (
         <Animated.View entering={FadeIn.duration(260)} style={[styles.banner, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
             <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: theme.warnSoft, alignItems: 'center', justifyContent: 'center' }}>
@@ -90,7 +136,9 @@ export function HomeScreen({ theme }: { theme: Theme }) {
                 No IPO is accepting bids today
               </Text>
               <Text style={{ color: theme.textSub, fontSize: 11.5, marginTop: 2 }}>
-                {nextUp.name} opens in {diffDays(today, parseISO(nextUp.openDate))} days on {new Date(parseISO(nextUp.openDate)).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}.
+                {`${nextUp.name} opens ${nextUpIn === 1 ? 'tomorrow' : `in ${pluralDays(nextUpIn)}`} on ${formatWeekday(nextUp.openDate)}${
+                  isUnconfirmed(nextUp, 'open') ? ' (tentative)' : ''
+                }.`}
               </Text>
             </View>
           </View>
@@ -102,9 +150,9 @@ export function HomeScreen({ theme }: { theme: Theme }) {
           value={tab}
           onChange={setTab}
           options={[
-            { key: 'open', label: 'Open', count: buckets.open.length },
-            { key: 'upcoming', label: 'Upcoming', count: buckets.upcoming.length },
-            { key: 'closed', label: 'Closed', count: buckets.closed.length },
+            { key: 'open', label: 'Open', count: board.open.length },
+            { key: 'upcoming', label: 'Upcoming', count: board.upcoming.length },
+            { key: 'closed', label: 'Closed', count: board.closed.length },
           ]}
         />
       </View>
@@ -173,7 +221,7 @@ export function HomeScreen({ theme }: { theme: Theme }) {
           }
           ListFooterComponent={
             <Text style={[styles.footer, { color: theme.textMuted }]}>
-              Indicative data from public trackers \u2022 not investment advice.
+              Indicative data from public trackers • not investment advice.
             </Text>
           }
         />

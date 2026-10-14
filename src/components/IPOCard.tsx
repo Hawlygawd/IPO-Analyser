@@ -4,23 +4,26 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { cardShadow, radius, Theme } from '../theme';
 import { IPO } from '../lib/types';
-import { dateLine, gmpSeries, phaseOf } from '../lib/analysis';
+import { computeTrend, dateLine, phaseOf } from '../lib/analysis';
 import { formatRupees, gmpPercent } from '../lib/format';
+import { IpoPhase } from '../lib/types';
 import { Avatar, Chip, ChipTone } from './ui';
 
-export function phaseTone(phase: string): ChipTone {
+export function phaseTone(phase: IpoPhase): ChipTone {
   if (phase === 'open') return 'up';
   if (phase === 'upcoming') return 'info';
-  if (phase === 'allotment') return 'warn';
+  if (phase === 'allotment' || phase === 'awaiting') return 'warn';
   return 'neutral';
 }
 
-function subscriptionStat(ipo: IPO): { value: string; sub: string } {
+function subscriptionStat(ipo: IPO, phase: IpoPhase): { value: string; sub: string } {
   const s = ipo.subscription;
   if (s?.total != null) return { value: `${s.total.toFixed(2)}x`, sub: 'Overall' };
   if (s?.retail != null) return { value: `${s.retail.toFixed(2)}x`, sub: 'Retail' };
   if (s?.qib != null) return { value: `${s.qib.toFixed(2)}x`, sub: 'QIB' };
-  return { value: '\u2014', sub: phaseOf(ipo).key === 'upcoming' ? 'Not open' : 'Awaiting' };
+  // "Awaiting" only makes sense while bidding is live; closed issues simply have no figures on the board.
+  const sub = phase === 'upcoming' || phase === 'awaiting' ? 'Not open' : phase === 'open' ? 'Awaiting' : 'No data';
+  return { value: '\u2014', sub };
 }
 
 function gmpStat(ipo: IPO): { value: string; sub: string; tone: ChipTone } {
@@ -35,14 +38,14 @@ function gmpStat(ipo: IPO): { value: string; sub: string; tone: ChipTone } {
   };
 }
 
+/** Uses the shared trend logic so the card never disagrees with the GMP board / detail screen. */
 function trendStat(ipo: IPO): { dir: 'up' | 'down' | 'flat'; label: string; tone: ChipTone } {
-  const series = gmpSeries(ipo);
-  const delta = series[series.length - 1] - series[0];
-  const pct = gmpPercent(ipo);
-  if (pct != null && pct >= 25 && delta >= 0) return { dir: 'up', label: 'Strong', tone: 'up' };
-  if (delta > 2) return { dir: 'up', label: 'Rising', tone: 'up' };
-  if (delta < -2) return { dir: 'down', label: 'Soft', tone: 'down' };
-  return { dir: 'flat', label: 'Steady', tone: 'neutral' };
+  const trend = computeTrend(ipo);
+  return {
+    dir: trend.dir,
+    label: trend.short,
+    tone: trend.dir === 'up' ? 'up' : trend.dir === 'down' ? 'down' : 'neutral',
+  };
 }
 
 export function IPOCard({
@@ -60,7 +63,7 @@ export function IPOCard({
 }) {
   const phase = phaseOf(ipo);
   const gmp = gmpStat(ipo);
-  const sub = subscriptionStat(ipo);
+  const sub = subscriptionStat(ipo, phase.key);
   const trend = trendStat(ipo);
 
   return (
@@ -81,7 +84,7 @@ export function IPOCard({
               {ipo.name}
             </Text>
             <Text style={[styles.meta, { color: theme.textMuted }]} numberOfLines={1}>
-              {ipo.segment} \u2022 {dateLine(ipo)}
+              {`${ipo.segment} \u2022 ${dateLine(ipo)}`}
             </Text>
           </View>
           <View style={{ alignItems: 'flex-end', gap: 5 }}>
@@ -121,7 +124,7 @@ export function IPOCard({
               </Text>
             </View>
             <Text style={[styles.statSub, { color: theme.textMuted }]}>
-              {phase.key === 'upcoming' ? 'Pre-market' : '7 sessions'}
+              {phase.key === 'upcoming' || phase.key === 'awaiting' ? 'Pre-market' : '7 sessions'}
             </Text>
           </View>
         </View>
