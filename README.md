@@ -32,12 +32,6 @@ Keep these keys on the server; **never** put them in `EXPO_PUBLIC_*`, the mobile
 
 For native builds, set `EXPO_PUBLIC_IPO_API_URL` to the deployed function URL, e.g. `https://your-app.vercel.app/api/ipoFeed`. Web builds use same-origin `/api/ipoFeed` automatically. Without a deployed/configured endpoint, native builds show a clear connection error and retain cached data; the client does not silently bypass the proxy with direct third-party requests.
 
-## Android APK
-
-Pushes to `arena/533f3002-ipo-analyser` that change the app, source, or Android workflow trigger `.github/workflows/android-apk.yml`. A successful run attaches an installable APK to a GitHub release in **Releases**. The APK uses the existing `com.ipopulse.app` application ID and is signed with the configured Android release key when repository signing secrets are set; otherwise it uses Expo's test/debug key. Debug-signed APKs are for direct testing, not Play Store distribution, and may require uninstalling an older install if its signing key differs. To enable live refresh in the APK, configure the repository Actions variable `EXPO_PUBLIC_IPO_API_URL` with the public deployed `/api/ipoFeed` URL before building; this URL is public app configuration, not a secret. Without it, cached/bundled data remains available but live refresh cannot connect.
-
-The native app is branded **IPO Pulse**. Expo OTA updates are disabled in this standalone build so it cannot accidentally subscribe to the unrelated scaffold project's update channel.
-
 ## Local checks
 
 ```sh
